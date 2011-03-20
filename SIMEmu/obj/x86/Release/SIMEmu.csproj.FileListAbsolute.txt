@@ -1,6 +1,0 @@
-D:\My Projects\Comp128\SIMEmu\bin\Release\SIMEmu.exe.config
-D:\My Projects\Comp128\SIMEmu\bin\Release\SIMEmu.exe
-D:\My Projects\Comp128\SIMEmu\bin\Release\SIMEmu.pdb
-D:\My Projects\Comp128\SIMEmu\obj\x86\Release\ResolveAssemblyReference.cache
-D:\My Projects\Comp128\SIMEmu\obj\x86\Release\SIMEmu.exe
-D:\My Projects\Comp128\SIMEmu\obj\x86\Release\SIMEmu.pdb
