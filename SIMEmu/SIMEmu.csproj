@@ -43,6 +43,7 @@
     <Compile Include="Comp128.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="SIMBreaker.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
