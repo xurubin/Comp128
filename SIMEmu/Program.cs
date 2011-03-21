@@ -26,7 +26,7 @@ namespace SIMEmu
         {
             Comp128 GSMAlgo = new Comp128();
             Random rnd = new Random();
-            while (true)
+            //while (true)
             {
                 byte[] tki = new byte[16];
                 rnd.NextBytes(tki);
