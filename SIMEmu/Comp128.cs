@@ -11,15 +11,27 @@ namespace SIMEmu
         IntTransformer t;
         public IntComparer(IntTransformer t) { this.t = t; }
 
-
-        #region IComparer<int> Members
-
         public int Compare(T x, T y)
         {
             return t(x).CompareTo(t(y));
         }
-
-        #endregion
+    }
+    class HammingDistance
+    {
+        public static int int_hamming(int x)
+        {
+            int r = 0;
+            for (int i = 0; i < 32; i++)
+            {
+                r = r + (x & 1);
+                x >>= 1;
+            }
+            return r;
+        }
+        public static int long_hamming(long x)
+        {
+            return int_hamming((int)x) + int_hamming((int)(x >> 32));
+        }
     }
     class Comp128
     {
@@ -192,7 +204,7 @@ namespace SIMEmu
             }
         }
 
-        public void swap(ref int m, ref int n, int j)
+        public static void swap(ref int m, ref int n, int j)
         {
             int y = (m + 2 * n) % (1 << (9 - j));
             int z = (2 * m + n) % (1 << (9 - j));
@@ -200,7 +212,7 @@ namespace SIMEmu
             n = table[j][z];
         }
 
-        public int Compute2R(int K0, int K8, int R0, int R8)
+        public static int Compute2R(int K0, int K8, int R0, int R8)
         {
             swap(ref K0, ref R0, 0);
             swap(ref K8, ref R8, 0);
@@ -212,7 +224,7 @@ namespace SIMEmu
                     (R8 & 0x7F);
         }
 
-        public Int64 Compute3R(int K0, int K4, int K8, int K12, int R0, int R4, int R8, int R12)
+        public static Int64 Compute3R(int K0, int K4, int K8, int K12, int R0, int R4, int R8, int R12)
         {
             swap(ref K0, ref R0, 0);
             swap(ref K4, ref R4, 0);
@@ -427,22 +439,6 @@ namespace SIMEmu
             return simoutput;
         }
 
-
-        private int int_hamming(int x)
-        {
-            int r= 0;
-            for (int i = 0; i < 32; i++)
-            {
-                r = r + (x & 1);
-                x >>= 1;
-            }
-            return r;
-        }
-
-        private int long_hamming(long x)
-        {
-            return int_hamming((int)x) + int_hamming((int)(x >> 32));
-        }
         public void Break()
         {
             byte[] s = new byte[16];
@@ -494,7 +490,7 @@ namespace SIMEmu
                     for (int k0 = 0; k0 <= 0xFF; k0++)
                         for (int k8 = 0; k8 <= 0xFF; k8++)
                             K08.Add(new KeyValuePair<int,int>((k0<<8) | k8, Compute2R(k0, k8, r0_0, r8_0) ^ Compute2R(k0, k8, r0_1, r8_1)));
-                    K08.Sort(new IntComparer<KeyValuePair<int, int>>(v => long_hamming(v.Value)));
+                    K08.Sort(new IntComparer<KeyValuePair<int, int>>(v => HammingDistance.long_hamming(v.Value)));
 
                     foreach (var k08 in K08)
                     {
@@ -508,7 +504,7 @@ namespace SIMEmu
                                     Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0) ^ 
                                     Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0)
                                     ));
-                        K412.Sort(new IntComparer<KeyValuePair<int, long>>(v => long_hamming(v.Value)));
+                        K412.Sort(new IntComparer<KeyValuePair<int, long>>(v => HammingDistance.long_hamming(v.Value)));
                         foreach (var k412 in K412)
                         {
                             int k4 = (k412.Key >> 8) & 0xFF;

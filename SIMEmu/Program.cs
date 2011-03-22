@@ -162,9 +162,59 @@ namespace SIMEmu
             }
         }
 
+        class TestA38 : IComp128Impl
+        {
+            Random rnd = new Random(342);
+            Comp128 a38 = new Comp128();
+            public void Renew()
+            {
+                byte[] b = new byte[16];
+                rnd.NextBytes(b);
+                Console.Write("Private Key: ");
+                for (int j = 0; j < 16; j++) Console.Write(String.Format("{0:X02} ", b[j])); Console.WriteLine();
+                a38.setkey(b);
+            }
+
+
+            public bool A38(byte[] Rand, byte[] Result)
+            {
+                a38.A3A8(Rand).CopyTo(Result, 0);
+                return true;
+            }
+        }
+
         static void Main(string[] args)
         {
-            ComEmulator();
+            if (args.Length > 0)
+            {
+                CrackSIM(args[0]);
+                return;
+            }
+            //ComEmulator();
+            TestA38 t = new TestA38();
+            Comp128Cracker b = new Comp128Cracker(t);
+            t.Renew();
+            if (!b.InitNewSession("session.dat")) 
+                if (b.RestoreSession("session.dat"))
+                {
+                    b.Start();
+                    Console.ReadKey(true);
+                    b.Stop();
+                }
+                else
+                    Console.ReadKey(true);
+        }
+
+        static void CrackSIM(string sessionfile)
+        {
+            Comp128Cracker b = new Comp128Cracker(new SIMInterface());
+            if (!b.InitNewSession(sessionfile))
+                if (b.RestoreSession(sessionfile))
+                {
+                    b.Start();
+                    Console.ReadKey(true);
+                    b.Stop();
+                }
         }
     }
 }
