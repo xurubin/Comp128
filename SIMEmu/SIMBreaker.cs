@@ -99,7 +99,8 @@ namespace SIMEmu
                     byte[] r = (byte[])Rand.Clone();
                     byte[] rr = new byte[12];
                     for(int j=0;j<4;j++) r[kid+4*j] = b[12 + j];
-                    comp128.A38(r, rr);
+                    if (!comp128.A38(r, rr))
+                        return false;
                     bool mismatch = false;
                     for (int j = 0; j < rr.Length; j++) if (rr[j] != b[j]) mismatch = true;
                     if (mismatch)
@@ -136,6 +137,31 @@ namespace SIMEmu
             session.Close();
         }
 
+        private long Get3RCollisionProbability(long R0, long R1)
+        {
+            long p = 1;
+            for (int i = 0; i < 8; i++)
+            {
+                int r0 = (int)(R0 & 0x3F); R0 >>= 6;
+                int r1 = (int)(R1 & 0x3F); R1 >>= 6;
+                if (r0 == r1) //Collision at 3R gives 100% contribution
+                {
+                    p *= (1 << 6);
+                    continue;
+                }
+                int denom = 0;
+                for (int r2 = 0; r2 < (1 << 6); r2++)
+                {
+                    int t0 = r0, t1 = r1, t0_ = r2, t1_ = r2;
+                    Comp128.swap(ref t0, ref t0_, 3);
+                    Comp128.swap(ref t1, ref t1_, 3);
+                    if ((t0 == t1) && (t0_ == t1_)) denom++;
+                }
+                if (denom == 0) return 0;
+                p *= denom ;
+            }
+            return p;
+        }
         public void Solve3RCollision(uint R0, uint R1)
         {
             Console.WriteLine("Searching key pair using 3R collision.");
@@ -165,18 +191,30 @@ namespace SIMEmu
                             Comp128.Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0)
                             ));
                 K412.Sort(new IntComparer<KeyValuePair<int, long>>(v => HammingDistance.long_hamming(v.Value)));
+
+                //Find probability of 3R/4R collisions of every quadruple Ri
+                List<KeyValuePair<int, long>> K412P = new List<KeyValuePair<int, long>>();
                 foreach (var k412 in K412)
                 {
                     int k4 = (k412.Key >> 8) & 0xFF;
                     int k12 = (k412.Key >> 0) & 0xFF;
-                    long diff = Comp128.Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0) ^
-                        Comp128.Compute3R(k0, k4, k8, k12, r0_1, r4_1, r8_1, r12_1);
-                    if ( HammingDistance.long_hamming(diff) <= 1)
-                    {
-                        Console.WriteLine(String.Format("Computed Key: {0:x2} {1:x2} {2:x2} {3:x2}",
-                            new object[] { k0, k4, k8, k12 }));
-                        candidate_keys++;
-                    }
+                    long ThreeR0 = Comp128.Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0);
+                    long ThreeR1 = Comp128.Compute3R(k0, k4, k8, k12, r0_1, r4_1, r8_1, r12_1);
+                    long diff = ThreeR0 ^ ThreeR1;
+                    if (HammingDistance.long_hamming(diff) > 2) continue;
+                    long p = Get3RCollisionProbability(ThreeR0, ThreeR1);
+                    if (p == 0) continue;
+                    K412P.Add(new KeyValuePair<int, long>((k4 << 8) | k12, p));
+                }
+                //Output quadruple Ri in descending probabilities of 3R/4R collision
+                K412P.Sort((x, y) => x.Value.CompareTo(y.Value));
+                foreach (var k412p in K412P)
+                {
+                    int k4 = (k412p.Key >> 8) & 0xFF;
+                    int k12 = (k412p.Key >> 0) & 0xFF;
+                    Console.WriteLine(String.Format("Computed Key: {0:x2} {1:x2} {2:x2} {3:x2} with p = {4:F2}%",
+                        new object[] { k0, k4, k8, k12, k412p.Value * 100.0 / ((long)1<<48) }));
+                    candidate_keys++;
                 }
                 if (candidate_keys > 0)
                     Console.WriteLine(String.Format("Found {0} possible keys.", candidate_keys));
@@ -184,20 +222,25 @@ namespace SIMEmu
         }
         public void Collect()
         {
-            long t = System.Environment.TickCount;
+            long t0, t;
+            t0 = t = System.Environment.TickCount;
+            int c0 = hashes.Count;
+
             byte[] r = new byte[12];
             Console.WriteLine();
             while (!stopping)
             {
                 if (System.Environment.TickCount - t > 250)
                 {
-                    Console.Write(String.Format("\rObtained {0:d8} hashes.", hashes.Count));
                     t = System.Environment.TickCount;
+                    Console.Write(String.Format("\rObtained {0:d8} hashes. Speed: {1:F2} op/sec", 
+                        hashes.Count, (hashes.Count - c0)/((t - t0) / 1000.0))
+                        );
                 }
                 for (int i = 0; i < 4;i++)
                     Rand[kid + 4 * i] = start_pos[i];
 
-                comp128.A38(Rand, r);
+                if (!comp128.A38(Rand, r)) break;
                 
                 ulong k = Pack8Bytes(r);
                 uint v = Pack4Bytes(start_pos[0], start_pos[1], start_pos[2], start_pos[3]);
@@ -240,7 +283,7 @@ namespace SIMEmu
 
             string[] readers = iCard.ListReaders();
             Console.WriteLine("Please insert card into the reader and press any key...");
-            Console.ReadKey();
+            Console.ReadKey(true);
 
             iCard.Connect(readers[0], SHARE.Shared, PROTOCOL.T0orT1);
             Console.WriteLine("Connects card on reader: " + readers[0]);
@@ -357,6 +400,7 @@ namespace SIMEmu
         }
         public bool A38(byte[] Rand, byte[] Result)
         {
+            Debug.Assert(Rand.Length == 16);
             try
             {
                 if (!DFgsm_selected) SelectDFGsm();
@@ -364,16 +408,8 @@ namespace SIMEmu
                 APDUResponse apduResp;
                 APDUParam apduParam = new APDUParam();
 
-                // Select the DF_GSM (7F20)
-                apduParam.Data = (byte[])Rand.Clone();
-                apduSelectFile.Update(apduParam);
-                apduResp = iCard.Transmit(apduSelectFile);
-                if (apduResp.Status != SC_OK && apduResp.SW1 != SC_PENDING)
-                    throw new Exception("Select command failed: " + apduResp.ToString());
-                Console.WriteLine("DFgsm selected");
-
                 //Execute A38 Algorithm
-                apduParam.Data = new byte[16];
+                apduParam.Data = (byte[])Rand.Clone();
                 apduRunGSM.Update(apduParam);
                 apduResp = iCard.Transmit(apduRunGSM);
                 if (apduResp.SW1 != SC_PENDING)

@@ -373,7 +373,7 @@ namespace SIMEmu
                 if (badrand[i].ContainsKey(r))
                 {
                     fake_key[i] = fake_key[i + 8] = 12;
-                    Console.Write("F");
+                    //Console.Write("F");
                     byte[] faker = new byte[12];
                     rnd.NextBytes(faker);
                     return faker;

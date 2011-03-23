@@ -164,12 +164,14 @@ namespace SIMEmu
 
         class TestA38 : IComp128Impl
         {
-            Random rnd = new Random(342);
+            Random rnd = new Random(123);
             Comp128 a38 = new Comp128();
             public void Renew()
             {
                 byte[] b = new byte[16];
                 rnd.NextBytes(b);
+                b[1] = 0xab; b[5] = 0xd0; 
+                b[9] = 0x7d; b[13] = 0xc6;
                 Console.Write("Private Key: ");
                 for (int j = 0; j < 16; j++) Console.Write(String.Format("{0:X02} ", b[j])); Console.WriteLine();
                 a38.setkey(b);
@@ -187,34 +189,29 @@ namespace SIMEmu
         {
             if (args.Length > 0)
             {
-                CrackSIM(args[0]);
+                CrackSIM(new SIMInterface(), args[0]);
                 return;
             }
-            //ComEmulator();
             TestA38 t = new TestA38();
-            Comp128Cracker b = new Comp128Cracker(t);
             t.Renew();
-            if (!b.InitNewSession("session.dat")) 
-                if (b.RestoreSession("session.dat"))
-                {
-                    b.Start();
-                    Console.ReadKey(true);
-                    b.Stop();
-                }
-                else
-                    Console.ReadKey(true);
+            CrackSIM(t, "session.dat");
         }
 
-        static void CrackSIM(string sessionfile)
+        static void CrackSIM(IComp128Impl sim, string sessionfile)
         {
-            Comp128Cracker b = new Comp128Cracker(new SIMInterface());
-            if (!b.InitNewSession(sessionfile))
-                if (b.RestoreSession(sessionfile))
-                {
-                    b.Start();
-                    Console.ReadKey(true);
-                    b.Stop();
-                }
+            Comp128Cracker b = new Comp128Cracker(sim);
+            bool new_session = b.InitNewSession(sessionfile);
+            if (new_session || ((!new_session) && (b.RestoreSession(sessionfile))))
+            {
+                b.Start();
+                Console.ReadKey(true);
+                b.Stop();
+            }
+            else
+            {
+                Console.WriteLine("Fail to InitNewSession or RestoreSession.");
+                Console.ReadKey(true);
+            }
         }
     }
 }
