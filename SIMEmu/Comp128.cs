@@ -136,10 +136,6 @@ namespace SIMEmu
         Dictionary<int, int>[] badrand = new Dictionary<int, int>[8];
         Random rnd = new Random();
 
-        private void Do3RExperiment()
-        {
-            
-        }
         public void setkey(byte[] key)
         {
             for(int i=0;i<16;i++)
@@ -148,66 +144,14 @@ namespace SIMEmu
 
             for(int i=0;i<8;i++)
             {
-                badrand[i] = find_collision_rands(i);
-                #region R3Exp
-                /*
-                var pr = find_collision_pseudo_rands(i);
-                Int64 h_;
-                int c_counter = 0, c_times = 0;
-                int[] p = new int[pr.Keys.Count]; int pi = 0;
-                foreach (var x in pr.Keys) p[pi++] = x;
-                int mask = (((1<<21) - 1)<<7);
-                for (int j = 0; j < p.Length; j++)
-                    for (int k = j + 1; k < p.Length;k++)
-                    {
-                        if ((p[j] & mask) != (p[k] & mask)) continue;
-                        Dictionary<Int64, int[]> c = new Dictionary<Int64, int[]>();
-                        int R0_1 = (p[j] >> 8) & 0xFF;
-                        int R8_1 = p[j] & 0xFF;
-                        int R0_2 = (p[k] >> 8) & 0xFF;
-                        int R8_2 = p[k] & 0xFF;
-                        bool collide = false;
-                        for (int x = 0; x < 65536; x++)
-                        {
-                            int R4 = x >> 8;
-                            int R12 = x & 0xFF;
-                            Int64 h1 = Compute3R(key[i], key[i + 4], key[i + 8], key[i + 12], R0_1, R4, R8_1, R12);
-                            if (c.ContainsKey(h1))
-                            {
-                                int[] PrevR = c[h1];
-                                c_counter += x;
-                                collide = true;
-                                break;
-                            }
-                            else
-                                c[h1] = new int[] { R0_1, R4, R8_1, R12 };
-
-                            Int64 h2 = Compute3R(key[i], key[i + 4], key[i + 8], key[i + 12], R0_2, R4, R8_2, R12);
-                            if (c.ContainsKey(h2))
-                            {
-                                int[] PrevR = c[h2];
-                                c_counter += x;
-                                collide = true;
-                                break;
-                            }
-                            else
-                                c[h2] = new int[] { R0_2, R4, R8_2, R12 };
-                        }
-                        if (collide)
-                            c_times++;
-                        else
-                            Console.WriteLine("3R Collision free.");
-                    }
-                Console.WriteLine("Average collision time: " + (c_counter / c_times).ToString());
-                 * */
-                #endregion
+                badrand[i] = find_2Rcollision_rands(key[i], key[i+8]);
             }
         }
 
         public static void swap(ref int m, ref int n, int j)
         {
-            int y = (m + 2 * n) % (1 << (9 - j));
-            int z = (2 * m + n) % (1 << (9 - j));
+            int y = (m + 2 * n) & ((1 << (9 - j)) - 1);
+            int z = (2 * m + n) & ((1 << (9 - j)) - 1);
             m = table[j][y];
             n = table[j][z];
         }
@@ -224,7 +168,7 @@ namespace SIMEmu
                     (R8 & 0x7F);
         }
 
-        public static Int64 Compute3R(int K0, int K4, int K8, int K12, int R0, int R4, int R8, int R12)
+        public static long Compute3R(int K0, int K4, int K8, int K12, int R0, int R4, int R8, int R12)
         {
             swap(ref K0, ref R0, 0);
             swap(ref K4, ref R4, 0);
@@ -240,22 +184,25 @@ namespace SIMEmu
             swap(ref R8, ref R12, 2);
             swap(ref K0, ref K4, 2);
             swap(ref K8, ref K12, 2);
-            return ((Int64)K0 & 0x3F) << (6 * 7) |
-                   ((Int64)K4 & 0x3F) << (6 * 6) |
-                   ((Int64)K8 & 0x3F) << (6 * 5) |
-                   ((Int64)K12& 0x3F) << (6 * 4) |
-                   ((Int64)R0 & 0x3F) << (6 * 3) |
-                   ((Int64)R4 & 0x3F) << (6 * 2) |
-                   ((Int64)R8 & 0x3F) << (6 * 1) |
-                   ((Int64)R12& 0x3F) << (6 * 0);
+            return (((long)(((uint)K0) << (6 * 3) | ((uint)K4) << (6 * 2) | ((uint)K8) << (6 * 1) | ((uint)K12) << (6 * 0))) << 24) |
+                    ((long)(((uint)R0) << (6 * 3) | ((uint)R4) << (6 * 2) | ((uint)R8) << (6 * 1) | ((uint)R12) << (6 * 0)));
+            
+            //return ((Int64)K0 & 0x3F) << (6 * 7) |
+            //       ((Int64)K4 & 0x3F) << (6 * 6) |
+            //       ((Int64)K8 & 0x3F) << (6 * 5) |
+            //       ((Int64)K12& 0x3F) << (6 * 4) |
+            //       ((Int64)R0 & 0x3F) << (6 * 3) |
+            //       ((Int64)R4 & 0x3F) << (6 * 2) |
+            //       ((Int64)R8 & 0x3F) << (6 * 1) |
+            //       ((Int64)R12& 0x3F) << (6 * 0);
         }
 
-        public Dictionary<int, int> find_collision_rands(int keyid)
+        public static Dictionary<int, int> find_2Rcollision_rands(int key0, int key8)
         {
             Dictionary<int, int> collisions = new Dictionary<int, int>();
             List<KeyValuePair<int, int>> v = new List<KeyValuePair<int, int>>();
-            int k0 = key[keyid + 0];
-            int k8 = key[keyid + 8];
+            int k0 = key0;
+            int k8 = key8;
             for (int r0 = 0; r0 < 256; r0++)
                 for (int r8 = 0; r8 < 256; r8++)
                     v.Add(new KeyValuePair<int, int>(r0 << 8 | r8, Compute2R(k0, k8, r0, r8)));
@@ -279,53 +226,6 @@ namespace SIMEmu
             }
 
             return collisions;
-        }
-
-        public Dictionary<int, int> find_collision_pseudo_rands(int keyid)
-        {
-            List<KeyValuePair<int, int>> v = new List<KeyValuePair<int, int>>();
-            int k0 = key[keyid + 0];
-            int k8 = key[keyid + 8];
-            for (int r0 = 0; r0 < 256; r0++)
-                for (int r8 = 0; r8 < 256; r8++)
-                    v.Add(new KeyValuePair<int, int>(r0 << 8 | r8, Compute2R(k0, k8, r0, r8)));
-
-            v.Sort(delegate(KeyValuePair<int, int> c1, KeyValuePair<int, int> c2)
-            {
-                return Comparer<int>.Default.Compare(c1.Value, c2.Value);
-            });
-
-            Dictionary<int, int> full_collisions = new Dictionary<int, int>();
-            var i = v.GetEnumerator();
-            i.MoveNext();
-            var prev = i.Current;
-            while (i.MoveNext())
-            {
-                if (i.Current.Value == prev.Value)
-                {
-                    full_collisions[prev.Key] = prev.Value;
-                    full_collisions[i.Current.Key] = i.Current.Value;
-                }
-                prev = i.Current;
-            }
-            Dictionary<int, int> partial_collisions = new Dictionary<int, int>();
-            i = v.GetEnumerator();
-            i.MoveNext();
-            prev = i.Current;
-            int mask = (((1<<21) - 1)<<7);
-            while (i.MoveNext())
-            {
-                if ((i.Current.Value & mask) == (prev.Value & mask))
-                {
-                    if (!full_collisions.ContainsKey(prev.Key))
-                        partial_collisions[prev.Key] = prev.Value;
-                    if (!full_collisions.ContainsKey(i.Current.Key))
-                        partial_collisions[i.Current.Key] = i.Current.Value;
-                }
-                prev = i.Current;
-            }
-
-            return partial_collisions;
         }
 
         /* 

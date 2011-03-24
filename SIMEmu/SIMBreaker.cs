@@ -162,25 +162,104 @@ namespace SIMEmu
             }
             return p;
         }
+
+        Dictionary<int, int>[] blacklist_rand = new Dictionary<int, int>[65536];
+        private bool is_rand_blacklisted(int k0, int k8, int r0, int r8)
+        {
+            int pk = (k0 << 8) | k8;
+            int sk = (r0 << 8) | r8;
+            if (blacklist_rand[pk] == null)
+            {
+                blacklist_rand[pk] = new Dictionary<int, int>();
+                var X = Comp128.find_2Rcollision_rands(k0, k8);
+                foreach (var x in X)
+                {
+                    blacklist_rand[pk][x.Key] = 1;
+                }
+            }
+            return blacklist_rand[pk].ContainsKey(sk);
+        }
+
+        //Return all pairs of 2R partial collisions, differ only in [offset]
+        Dictionary<int, List<uint>> cache_2rpc = new Dictionary<int, List<uint>>();
+        private List<uint> find_2rpc_pair(int k0, int k8, int offset)
+        {
+            int pk = (k0 << 8) | k8;
+            if (cache_2rpc.ContainsKey(pk)) return cache_2rpc[pk];
+
+            List<KeyValuePair<uint, uint>> hashes = new List<KeyValuePair<uint, uint>>();
+            uint mask = ~((uint)0x7F << (7*offset));
+            for(uint r0=0;r0<256;r0++)
+                for (uint r8 = 0; r8 < 256; r8++)
+                {
+                    hashes.Add(new KeyValuePair<uint, uint>((r0 << 8) | r8, (uint)Comp128.Compute2R(k0, k8, (int)r0, (int)r8) & mask));
+                }
+            hashes.Sort((x, y) => x.Value.CompareTo(y.Value));
+
+            List<uint> result = new List<uint>();
+            var p = hashes.GetEnumerator();
+            var prev = p;
+            while (p.MoveNext())
+            {
+                if (p.Current.Value == prev.Current.Value) 
+                    if (!is_rand_blacklisted(k0, k8, (int)prev.Current.Key, (int)p.Current.Key))
+                        result.Add((prev.Current.Key << 16) | p.Current.Key);
+                prev = p;
+            }
+            cache_2rpc[pk] = result;
+            return result;
+        }
         private bool Find3RCollisionPair(int k0, int k4, int k8, int k12, ref uint r0, ref uint r1)
         {
             r0 = r1 = 0;
             Dictionary<ulong, uint> seen = new Dictionary<ulong, uint>();
+            var L_2RPC = find_2rpc_pair(k0, k8, 0);
+            int count = 0;
             Random prng = new Random();
-            byte[] r = new byte[4];
-            while(true){
-                prng.NextBytes(r);
-                uint r_int = Pack4Bytes(r[0], r[1], r[2], r[3]);
-                ulong h = (ulong)Comp128.Compute3R(k0, k4, k8, k12, r[0], r[1], r[2], r[3]);
-                if (seen.ContainsKey(h) && seen[h] != r_int)
+            foreach (var l_2prc in L_2RPC)
+                for (int r_int = 0; r_int <= 0x7F; r_int++ )
                 {
-                    r0 = seen[h];
-                    r1 = r_int;
-                    return true;
+                    byte r0_0 = (byte)(l_2prc >> 24);
+                    byte r0_8 = (byte)(l_2prc >> 16);
+                    byte r1_0 = (byte)(l_2prc >> 8);
+                    byte r1_8 = (byte)(l_2prc >> 0);
+                    byte r0_4, r1_4;
+                    r0_4 = r1_4 = (byte)prng.Next();//(r_int >> 0);
+                    byte r0_12, r1_12;
+                    r0_12 = r1_12 = (byte)prng.Next(); // (r_int >> 8);
+                    count++;
+                    if (is_rand_blacklisted(k4, k12, r0_4, r0_12)) continue;
+                    if (Comp128.Compute3R(k0, k4, k8, k12, r0_0, r0_4, r0_8, r0_12) ==
+                        Comp128.Compute3R(k0, k4, k8, k12, r1_0, r1_4, r1_8, r1_12))
+                    {
+                        r0 = Pack4Bytes(r0_0, r0_4, r0_8, r0_12);
+                        r1 = Pack4Bytes(r1_0, r1_4, r1_8, r1_12);
+                        return true;
+                    }
                 }
-                else
-                    seen[h] = r_int;
-            }
+            return false;
+            //r0 = r1 = 0;
+            //Dictionary<ulong, uint> seen = new Dictionary<ulong, uint>();
+            //Random prng = new Random();
+            //byte[] r = new byte[4];
+            //uint r_int = 0;
+            //while(true){
+            //    r[3] = (byte)(r_int >> 0);
+            //    r[2] = (byte)(r_int >> 8);
+            //    r[1] = (byte)(r_int >> 16);
+            //    r[0] = (byte)(r_int >> 24);
+            //    if (is_rand_blacklisted(k0, k8, r[0], r[2]) || is_rand_blacklisted(k4, k12, r[1], r[3])) { r_int++; continue; }
+            //    ulong h = (ulong)Comp128.Compute3R(k0, k4, k8, k12, r[0], r[1], r[2], r[3]);
+            //    if (seen.ContainsKey(h) && seen[h] != r_int)
+            //    {
+            //        r0 = Pack4Bytes((byte)(seen[h] >> 24), (byte)(seen[h] >> 16), (byte)(seen[h] >> 8), (byte)(seen[h] >> 0));
+            //        r1 = Pack4Bytes((byte)(r_int >> 24), (byte)(r_int >> 16), (byte)(r_int >> 8), (byte)(r_int >> 0));
+            //        return true;
+            //    }
+            //    else
+            //        seen[h] = r_int;
+            //    r_int++;
+            //}
         }
         public void Solve3RCollision(uint R0, uint R1)
         {
@@ -201,7 +280,6 @@ namespace SIMEmu
             {
                 int k0 = (k08.Key >> 8) & 0xFF;
                 int k8 = (k08.Key >> 0) & 0xFF;
-                int candidate_keys = 0;
                 //SOrt K4 K12 in ascending order of 3R
                 List<KeyValuePair<int, long>> K412 = new List<KeyValuePair<int, long>>();
                 for (int k4 = 0; k4 <= 0xFF; k4++)
@@ -221,34 +299,49 @@ namespace SIMEmu
                     long ThreeR0 = Comp128.Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0);
                     long ThreeR1 = Comp128.Compute3R(k0, k4, k8, k12, r0_1, r4_1, r8_1, r12_1);
                     long diff = ThreeR0 ^ ThreeR1;
-                    if (HammingDistance.long_hamming(diff) > 2) continue;
+                    if (HammingDistance.long_hamming(diff) > 1) continue;
                     long p = Get3RCollisionProbability(ThreeR0, ThreeR1);
                     if (p == 0) continue;
                     K412P.Add(new KeyValuePair<int, long>((k4 << 8) | k12, p));
                 }
+                if (K412P.Count > 0)
+                    Console.WriteLine(String.Format("Found {0} candidate keys.", K412P.Count));
                 //Output quadruple Ri in descending probabilities of 3R/4R collision
                 K412P.Sort((x, y) => x.Value.CompareTo(y.Value));
-                byte[] test_r = new byte[16];
-                (new Random()).NextBytes(test_r);
-                byte[] test_rst0 = new byte[12];
-                byte[] test_rst1 = new byte[12];
-                foreach (var k412p in K412P)
+                List<KeyValuePair<int, long>> K412R;
+                do
                 {
-                    int k4 = (k412p.Key >> 8) & 0xFF;
-                    int k12 = (k412p.Key >> 0) & 0xFF;
-                    uint test_r0 = 0, test_r1 = 0;
-                    Find3RCollisionPair(k0, k4, k8, k12, ref test_r0, ref test_r1);
-                    Unpack4Bytes(test_r0, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
-                    comp128.A38(test_r, test_rst0);
-                    Unpack4Bytes(test_r1, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
-                    comp128.A38(test_r, test_rst1);
-                    bool false_positive = (Pack8Bytes(test_rst0) != Pack8Bytes(test_rst1));
-                    Console.WriteLine(String.Format("{5} Key: {0:x2} {1:x2} {2:x2} {3:x2} with p = {4:F2}%",
-                        new object[] { k0, k4, k8, k12, k412p.Value * 100.0 / ((long)1 << 48), false_positive ? "False" : "Computed" }));
-                    candidate_keys++;
-                }
-                if (candidate_keys > 0)
-                    Console.WriteLine(String.Format("Found {0} possible keys.", candidate_keys));
+                    byte[] test_r = new byte[16];
+                    (new Random()).NextBytes(test_r);
+                    byte[] test_rst0 = new byte[12];
+                    byte[] test_rst1 = new byte[12];
+                    int refined_keys = 0;
+                    K412R = new List<KeyValuePair<int, long>>();
+                    foreach (var k412p in K412P)
+                    {
+                        int k4 = (k412p.Key >> 8) & 0xFF;
+                        int k12 = (k412p.Key >> 0) & 0xFF;
+                        uint test_r0 = 0, test_r1 = 0;
+                        //Obtain another 3R collision pair for a particular key and test in on real algo.
+                        Debug.Assert(Find3RCollisionPair(k0, k4, k8, k12, ref test_r0, ref test_r1));
+                        Unpack4Bytes(test_r0, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
+                        comp128.A38(test_r, test_rst0);
+                        Unpack4Bytes(test_r1, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
+                        comp128.A38(test_r, test_rst1);
+                        bool false_positive = (Pack8Bytes(test_rst0) != Pack8Bytes(test_rst1));
+                        Console.WriteLine(String.Format("{5} Key: {0:x2} {1:x2} {2:x2} {3:x2} with p = {4:F2}%",
+                            new object[] { k0, k4, k8, k12, k412p.Value * 100.0 / ((long)1 << 48), false_positive ? "False" : "Possible" }));
+                        if (!false_positive)
+                        {
+                            refined_keys++;
+                            K412R.Add(new KeyValuePair<int, long>(k4 << 8 | k12, k412p.Value));
+                        }
+                    }
+                    foreach (var k412r in K412R)
+                        Console.WriteLine(String.Format("Refined Key: {0:x2} {1:x2} {2:x2} {3:x2}",
+                            new object[] { k0, (k412r.Key >> 8) & 0xFF, k8, (k412r.Key >> 0) & 0xFF }));
+                    K412P = K412R;
+                }while (K412R.Count > 1);
             }
         }
         public void Collect()
