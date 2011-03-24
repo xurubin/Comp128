@@ -286,7 +286,7 @@ namespace SIMEmu
                     for (int k12 = 0; k12 <= 0xFF; k12++)
                         K412.Add(new KeyValuePair<int, long>((k4 << 8) | k12,
                             Comp128.Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0) ^
-                            Comp128.Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0)
+                            Comp128.Compute3R(k0, k4, k8, k12, r0_1, r4_1, r8_1, r12_1)
                             ));
                 K412.Sort(new IntComparer<KeyValuePair<int, long>>(v => HammingDistance.long_hamming(v.Value)));
 
@@ -299,7 +299,8 @@ namespace SIMEmu
                     long ThreeR0 = Comp128.Compute3R(k0, k4, k8, k12, r0_0, r4_0, r8_0, r12_0);
                     long ThreeR1 = Comp128.Compute3R(k0, k4, k8, k12, r0_1, r4_1, r8_1, r12_1);
                     long diff = ThreeR0 ^ ThreeR1;
-                    if (HammingDistance.long_hamming(diff) > 1) continue;
+                    if (HammingDistance.long_hamming(diff) > 6) break;
+                    if (HammingDistance.long_hamming(diff) > 3) continue;
                     long p = Get3RCollisionProbability(ThreeR0, ThreeR1);
                     if (p == 0) continue;
                     K412P.Add(new KeyValuePair<int, long>((k4 << 8) | k12, p));
