@@ -170,7 +170,7 @@ namespace SIMEmu
             {
                 byte[] b = new byte[16];
                 rnd.NextBytes(b);
-                b[1] = 0xab; b[5] = 0xd0; 
+                b[1] = 0xab; b[5] = 0x02; 
                 b[9] = 0x7d; b[13] = 0xc6;
                 Console.Write("Private Key: ");
                 for (int j = 0; j < 16; j++) Console.Write(String.Format("{0:X02} ", b[j])); Console.WriteLine();

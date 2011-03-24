@@ -162,6 +162,26 @@ namespace SIMEmu
             }
             return p;
         }
+        private bool Find3RCollisionPair(int k0, int k4, int k8, int k12, ref uint r0, ref uint r1)
+        {
+            r0 = r1 = 0;
+            Dictionary<ulong, uint> seen = new Dictionary<ulong, uint>();
+            Random prng = new Random();
+            byte[] r = new byte[4];
+            while(true){
+                prng.NextBytes(r);
+                uint r_int = Pack4Bytes(r[0], r[1], r[2], r[3]);
+                ulong h = (ulong)Comp128.Compute3R(k0, k4, k8, k12, r[0], r[1], r[2], r[3]);
+                if (seen.ContainsKey(h) && seen[h] != r_int)
+                {
+                    r0 = seen[h];
+                    r1 = r_int;
+                    return true;
+                }
+                else
+                    seen[h] = r_int;
+            }
+        }
         public void Solve3RCollision(uint R0, uint R1)
         {
             Console.WriteLine("Searching key pair using 3R collision.");
@@ -208,12 +228,23 @@ namespace SIMEmu
                 }
                 //Output quadruple Ri in descending probabilities of 3R/4R collision
                 K412P.Sort((x, y) => x.Value.CompareTo(y.Value));
+                byte[] test_r = new byte[16];
+                (new Random()).NextBytes(test_r);
+                byte[] test_rst0 = new byte[12];
+                byte[] test_rst1 = new byte[12];
                 foreach (var k412p in K412P)
                 {
                     int k4 = (k412p.Key >> 8) & 0xFF;
                     int k12 = (k412p.Key >> 0) & 0xFF;
-                    Console.WriteLine(String.Format("Computed Key: {0:x2} {1:x2} {2:x2} {3:x2} with p = {4:F2}%",
-                        new object[] { k0, k4, k8, k12, k412p.Value * 100.0 / ((long)1<<48) }));
+                    uint test_r0 = 0, test_r1 = 0;
+                    Find3RCollisionPair(k0, k4, k8, k12, ref test_r0, ref test_r1);
+                    Unpack4Bytes(test_r0, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
+                    comp128.A38(test_r, test_rst0);
+                    Unpack4Bytes(test_r1, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
+                    comp128.A38(test_r, test_rst1);
+                    bool false_positive = (Pack8Bytes(test_rst0) != Pack8Bytes(test_rst1));
+                    Console.WriteLine(String.Format("{5} Key: {0:x2} {1:x2} {2:x2} {3:x2} with p = {4:F2}%",
+                        new object[] { k0, k4, k8, k12, k412p.Value * 100.0 / ((long)1 << 48), false_positive ? "False" : "Computed" }));
                     candidate_keys++;
                 }
                 if (candidate_keys > 0)
