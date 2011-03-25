@@ -170,8 +170,8 @@ namespace SIMEmu
             {
                 byte[] b = new byte[16];
                 rnd.NextBytes(b);
-                b[1] = 0xab; b[5] = 0x02; 
-                b[9] = 0x7d; b[13] = 0xc6;
+                b[1] = 0xab; b[5] = 0xa0; 
+                b[9] = 0x7d; b[13] = 0xf1;
                 Console.Write("Private Key: ");
                 for (int j = 0; j < 16; j++) Console.Write(String.Format("{0:X02} ", b[j])); Console.WriteLine();
                 a38.setkey(b);
@@ -217,7 +217,7 @@ namespace SIMEmu
             bool new_session = b.InitNewSession(sessionfile);
             if (new_session || ((!new_session) && (b.RestoreSession(sessionfile))))
             {
-                b.Attack4R(0xab, 0x02, 0x7d, 0xc6);
+                //b.Attack4R(0xab, 0xa0, 0x7d, 0xf1);
                 b.Start();
                 Console.ReadKey(true);
                 b.Stop();

