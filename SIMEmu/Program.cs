@@ -187,6 +187,20 @@ namespace SIMEmu
 
         static void Main(string[] args)
         {
+            //for (int x0 = 0; x0 < (1 << 6); x0++)
+            //    for (int x1 = 0; x1 < (1 << 6); x1++)
+            //    {
+            //        if (x0 == x1) continue;
+            //        int collide_count = 0;
+            //        for (int y = 0; y < (1 << 6); y++)
+            //        {
+            //            int x0_ = x0, x1_ = x1, y0 = y, y1 = y;
+            //            Comp128.swap(ref x0_, ref y0, 3);
+            //            Comp128.swap(ref x1_, ref y1, 3);
+            //            if (x0_ == x1_ && y0 == y1) collide_count++;
+            //        }
+            //        Console.WriteLine(String.Format("{0:X2}{1:X2} Collision count: {2}", x0, x1, collide_count));
+            //    }
             if (args.Length > 0)
             {
                 CrackSIM(new SIMInterface(), args[0]);
@@ -203,6 +217,7 @@ namespace SIMEmu
             bool new_session = b.InitNewSession(sessionfile);
             if (new_session || ((!new_session) && (b.RestoreSession(sessionfile))))
             {
+                b.Attack4R(0xab, 0x02, 0x7d, 0xc6);
                 b.Start();
                 Console.ReadKey(true);
                 b.Stop();

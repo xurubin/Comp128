@@ -1,0 +1,75 @@
+Dejan Kaljevic
+04-22-2004, 04:08
+@SirGraham
+
+
+3th Round Attack of COMP128-1
+*************************************
+
+
+R=RND, K=Ki
+
+
+
+R0 K0 R8 K8 R4 K4 R12 K12 ;RND & Ki data 8 bit
+| X | | X | | / | / ;1R
+R0' K0' R8' K8' R4' K4' R12' K12' ;result == 8 bit 
+| \ / | | / 
+| \ / | | /
+| \/ | | / ;2R
+| / \ | | /
+| / \ | | /
+| / \| | /
+R0'' K0'' R8'' K8'' R4'' K4'' R12'' K12'' ;result == 7 bit
+| \ / |
+| \ / |
+| \ / |
+| \ / |
+| \ / |
+| \ / |
+| \ / | ;3R
+| / \ |
+| / \ |
+| / \ |
+| / \ |
+| / \ |
+| / \ |
+| / \ |
+R0''' K0''' R8''' K8''' R4''' K4''' R12''' K12''' ;result == 6 bit 
+
+
+From first phase using 2R attack on RND0,RND8 we can get Ki0,Ki8
+Using par3.bin file that takes approx. 31115/2 A38 challenges.
+
+After knowing Ki0,Ki8 and using RND0,RND8 we can set RND0'',RND8'',Ki0'',Ki8'' 
+in almost 65536 different values.
+From those ~65536 values we have to find pairs of RND0,RND8 that change only 
+ONE 7-bit element (example RND0'') 
+when other 3 elements keeps same values (example Ki0'',RND8'',Ki8'')
+
+Now we have to find in round 3 all combinations that gives f(R0''1,R4'') == f(R0''2,R4'')
+In round 3 there are only 66 combinations
+Example: f(RND0''= 8, Ki4'' = 0) == f(RND0''= 3Ch, Ki4'' = 0)
+
+Main problem is that we have from round 2 only ~65536 combinations and round 3 have
+input of 7*4 bits = 2^28 and we have to find at last 2 pair of RND0,RND8 that will
+cause collision on 3-th round!!!
+
+For example f(RND0''= 8, Ki4'' = 0) == f(RND0''= 3Ch, Ki4'' = 0)
+Using 2 pair of data on RND0,RND8 that gives RND0''1=8 & RND0''2=3Ch
+collision will occure only if Ki4'' = 0.
+Since Ki4'' have 7 bit = 2^7 = 128, changing RND4,RND12 , Ki4'' will have a value 0 
+in 1:128 casess. 
+Because we require two a38 challenges for one collision test, we will get first 
+collision in approx. 2*128/2 a38 challenges.
+
+Since Ki4'' = f(RND4,RND12,Ki4,Ki12), knowing Ki4'',RND4,RND12 we will have 512 valid 
+values of Ki4,Ki12.
+So, we have to change RND4,RND12 until remain only ONE valid value of Ki4,Ki12.
+To find Ki4,Ki12 we need approx, 128+256+256 = 640 A38 challenges!
+
+Same technique can be used for 4R,5R attack.
+
+
+
+Dejan Kaljevic

