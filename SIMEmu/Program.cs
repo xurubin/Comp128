@@ -164,11 +164,11 @@ namespace SIMEmu
 
         class TestA38 : IComp128Impl
         {
-            Random rnd = new Random(123);
+            Random rnd = new Random();//(123);
             Comp128 a38 = new Comp128();
             public void Renew()
             {
-                byte[] b = new byte[16];
+                byte[] b = new byte[16];// {?? 0xAB, ?? 0x6D, ?? 0xA0, ?? 0xA2, ?? 0x7D, ?? 0x8C, ?? 0xF1, ?? 0x2C};
                 rnd.NextBytes(b);
                 b[1] = 0xab; b[5] = 0xa0; 
                 b[9] = 0x7d; b[13] = 0xf1;
@@ -187,20 +187,27 @@ namespace SIMEmu
 
         static void Main(string[] args)
         {
-            //for (int x0 = 0; x0 < (1 << 6); x0++)
-            //    for (int x1 = 0; x1 < (1 << 6); x1++)
-            //    {
-            //        if (x0 == x1) continue;
-            //        int collide_count = 0;
-            //        for (int y = 0; y < (1 << 6); y++)
-            //        {
-            //            int x0_ = x0, x1_ = x1, y0 = y, y1 = y;
-            //            Comp128.swap(ref x0_, ref y0, 3);
-            //            Comp128.swap(ref x1_, ref y1, 3);
-            //            if (x0_ == x1_ && y0 == y1) collide_count++;
-            //        }
-            //        Console.WriteLine(String.Format("{0:X2}{1:X2} Collision count: {2}", x0, x1, collide_count));
-            //    }
+            int[] ct = new int[1<<7];
+            for (int x0 = 0; x0 < (1 << 7); x0++)
+                for (int d = 0; d < (1 << 7); d++)
+                {
+                    int x1 = (x0 + d) % (1<<7);
+                    if (x0 == x1) continue;
+                    int collide_count = 0;
+                    for (int y = 0; y < (1 << 7); y++)
+                    {
+                        int x0_ = x0, x1_ = x1, y0 = y, y1 = y;
+                        Comp128.swap(ref x0_, ref y0, 2);
+                        Comp128.swap(ref x1_, ref y1, 2);
+                        if (x0_ == x1_ && y0 == y1) collide_count++;
+                    }
+                    ct[d] += collide_count;
+                    if (collide_count < 1) continue;
+                   // Console.WriteLine(String.Format("{0:X2}{1:X2} Collision count: {2}", x0, d, collide_count));
+                }
+            for(int d=0;d<(1<<7);d++)
+                                    Console.WriteLine(String.Format("{0:X2} Collision count: {1}", d, ct[d]));
+
             if (args.Length > 0)
             {
                 CrackSIM(new SIMInterface(), args[0]);
@@ -218,6 +225,7 @@ namespace SIMEmu
             if (new_session || ((!new_session) && (b.RestoreSession(sessionfile))))
             {
                 //b.Attack4R(0xab, 0xa0, 0x7d, 0xf1);
+                //b.Attack5R(new int[]{0xAB, 0xAA, 0xA0, 0x9F, 0x7D, 0x05, 0xF1, 0x28});
                 b.Start();
                 Console.ReadKey(true);
                 b.Stop();

