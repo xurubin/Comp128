@@ -164,7 +164,7 @@ namespace SIMEmu
 
         class TestA38 : IComp128Impl
         {
-            Random rnd = new Random();//(123);
+            Random rnd = new Random(123);
             Comp128 a38 = new Comp128();
             public void Renew()
             {
@@ -222,10 +222,10 @@ namespace SIMEmu
         {
             Comp128Cracker b = new Comp128Cracker(sim);
             bool new_session = b.InitNewSession(sessionfile);
+            b.Attack5R(new int[] { 0xAB, 0xAA, 0xA0, 0x9F, 0x7D, 0x05, 0xF1, 0x28 });
             if (new_session || ((!new_session) && (b.RestoreSession(sessionfile))))
             {
                 //b.Attack4R(0xab, 0xa0, 0x7d, 0xf1);
-                //b.Attack5R(new int[]{0xAB, 0xAA, 0xA0, 0x9F, 0x7D, 0x05, 0xF1, 0x28});
                 b.Start();
                 Console.ReadKey(true);
                 b.Stop();

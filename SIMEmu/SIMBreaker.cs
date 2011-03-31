@@ -59,7 +59,7 @@ namespace SIMEmu
 
             Rand = new byte[16];
             start_pos = new byte[4];
-            kid = 0;
+            kid = 1;
             hashes = new Dictionary<ulong, uint>();
         }
         #region framework, IO stuff
@@ -671,54 +671,90 @@ namespace SIMEmu
             byte[] test_rst1 = new byte[12];
 
             int[][] collide_r = new int[8][];
+            int[] intermediate_5r = new int[16];
             for(int i=0;i<8;i++) collide_r[i] = new int[100];
             int collected_count = 0;
             Random prng = new Random();
+            bool test_r_inited = false;
             int a38_count = 0;
-            int offset = 0; 
-            Console.Write(String.Format("Trying 4RPC at offset {0}: ", offset));
-            foreach (var rpc in find_4rpc_pair(k, offset))
-            { //rpc[0..7] and rpc[8..15] are the pair that causes 2RPC
-                byte[] r0 = new byte[8]; Array.Copy(rpc, 0, r0, 0, 8);
-                byte[] r1 = new byte[8]; Array.Copy(rpc, 8, r1, 0, 8);
-                int[] rr0 = new int[16];
-                int[] rr1 = new int[16];
-                Comp128.Compute4R(k, r0, rr0);
-                Comp128.Compute4R(k, r1, rr1);
-                int intermediate_r = is_usable_5RCollision(rr0[offset], rr1[offset]);
-                if (intermediate_r < 0) continue;
-                Console.Write(".");
-                int fruitless_tries = 0;
-                while(true) //Try to obtain 5R collision probabilistically with p = 1/(1<<6)
-                {
-                    prng.NextBytes(test_r);
-                    for (int i = 0; i < 8; i++) test_r[kid + 2 * i] = r0[i];
-                    comp128.A38(test_r, test_rst0);
-                    for (int i = 0; i < 8; i++) test_r[kid + 2 * i] = r1[i];
-                    comp128.A38(test_r, test_rst1);
-                    a38_count += 2;
-                    bool collide = (Pack8Bytes(test_rst0) == Pack8Bytes(test_rst1));
-                    if (collide) //Obtain 5 bits of information, collect a few of them then bruteforce.
+            prng.NextBytes(test_r);
+            int[] correct_r = new int[16];
+            Comp128.Compute4R(new int[] { 0x03, 0xE1, 0xA5, 0xA1, 0xBA, 0x42, 0x8B, 0xBF },
+                                new byte[] { (byte)test_r[0], (byte)test_r[2], (byte)test_r[4], (byte)test_r[6],
+                                             (byte)test_r[8], (byte)test_r[10], (byte)test_r[12], (byte)test_r[14]},
+                                correct_r);
+
+            for (int offset = 0; offset < 16; offset++)
+            {
+                bool move_to_next_offset = false;
+                Console.Write(String.Format("Trying 4RPC at offset {0}: ", offset));
+                bool[] intermediate_r = new bool[1 << 5];
+                //for(int i=0;i<intermediate_r.Length; i++) intermediate_r[i] = true;
+                foreach (var rpc in find_4rpc_pair(k, offset))
+                { //rpc[0..7] and rpc[8..15] are the pair that causes 2RPC
+                    byte[] r0 = new byte[8]; Array.Copy(rpc, 0, r0, 0, 8);
+                    byte[] r1 = new byte[8]; Array.Copy(rpc, 8, r1, 0, 8);
+                    int[] rr0 = new int[16];
+                    int[] rr1 = new int[16];
+                    Comp128.Compute4R(k, r0, rr0);
+                    Comp128.Compute4R(k, r1, rr1);
+                    
+                   // int x0_ = rr0[offset];
+                   // int x1_ = rr1[offset];
+                    bool useful_collision = false;
+                    for (int x0_ = 0; x0_ < (1 << 5); x0_++)
+                        for (int x1_ = 0; x1_ < (1 << 5); x1_++)
+                            for (int ir = 0; ir < (1 << 5); ir++)
                     {
-                        fruitless_tries = 0;
-                        Console.WriteLine(String.Format("Found 4R collision after {0} A38 invocations.", a38_count));
-                        a38_count = 0;
-                        for (int i = 0; i < 8; i++) collide_r[i][collected_count] = test_r[(kid + 1) % 2 + 2 * i];
-                        collected_count++;
-                        //long x = Comp128.Compute3R(0xAA, 0x9F, 0x05, 0x28, test_r[kid + 2], test_r[kid + 6], test_r[kid + 10], test_r[kid + 14]);
-                        //int y = (int)(x >> (6 * offset)) & 0x3F;
-                        if (collected_count < 8) continue;
-                        bruteforce_from_4r_byte(collide_r, collected_count, intermediate_r, offset, k, test_r, test_rst1);
-                        //Console.WriteLine(String.Format("Obtained {0} candidates.", candidates.GetLength(0)));
-                        return true;
+                        int y0 = ir, y1 = ir;
+                        Comp128.swap(ref x0_, ref y0, 4);
+                        Comp128.swap(ref x1_, ref y1, 4);
+                        if ((x0_ == x1_ && y0 == y1)) //If x0, x1 causes a collision, it will eliminate ir as an candidate for intermediate_r.
+                        {
+                            if (intermediate_r[ir]) useful_collision = true;
+                            intermediate_r[ir] = true;
+                        }
                     }
-                    else
+                    //if (!useful_collision) continue;
+                    Console.Write(".");
+                    int fruitless_tries = 0;
+                    //r0, r1 if collide, will provide information on the intermediate r values.(intermediate_r)
+
+                    while (true) //Try to obtain 5R collision probabilistically with p = 1/(1<<6)
                     {
-                        fruitless_tries++;
-                        if (fruitless_tries > 4096) break;
+                        //if (!test_r_inited) prng.NextBytes(test_r);
+                        for (int i = 0; i < 8; i++) test_r[kid + 2 * i] = r0[i];
+                        comp128.A38(test_r, test_rst0);
+                        for (int i = 0; i < 8; i++) test_r[kid + 2 * i] = r1[i];
+                        comp128.A38(test_r, test_rst1);
+                        a38_count += 2;
+                        bool collide = (Pack8Bytes(test_rst0) == Pack8Bytes(test_rst1));
+                        if (collide) //Obtain 5 bits of information, collect a few of them then bruteforce.
+                        {
+                            fruitless_tries = 0;
+                            Console.WriteLine(String.Format("Found 4R collision after {0} A38 invocations.", a38_count));
+                            a38_count = 0;
+                            for (int i = 0; i < 8; i++) collide_r[i][collected_count] = test_r[(kid + 1) % 2 + 2 * i];
+                            collected_count++;
+                            //long x = Comp128.Compute3R(0xAA, 0x9F, 0x05, 0x28, test_r[kid + 2], test_r[kid + 6], test_r[kid + 10], test_r[kid + 14]);
+                            //int y = (int)(x >> (6 * offset)) & 0x3F;
+                            //if (collected_count < 8) continue;
+                            //bruteforce_from_4r_byte(collide_r, collected_count, intermediate_r, offset, k, test_r, test_rst1);
+                            //Console.WriteLine(String.Format("Obtained {0} candidates.", candidates.GetLength(0)));
+                            //return true;
+                            test_r_inited = true;
+                            move_to_next_offset = true;
+                            break;
+                        }
+                        else
+                        {
+                            fruitless_tries++;
+                            if (fruitless_tries > 1024) break;
+                        }
                     }
+                    if (move_to_next_offset) break;
                 }
-            }
+            }//end for offset
             return false;
         }
 
