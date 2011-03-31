@@ -168,10 +168,10 @@ namespace SIMEmu
             Comp128 a38 = new Comp128();
             public void Renew()
             {
-                byte[] b = new byte[16];// {?? 0xAB, ?? 0x6D, ?? 0xA0, ?? 0xA2, ?? 0x7D, ?? 0x8C, ?? 0xF1, ?? 0x2C};
-                rnd.NextBytes(b);
-                b[1] = 0xab; b[5] = 0xa0; 
-                b[9] = 0x7d; b[13] = 0xf1;
+                byte[] b = new byte[16] {0x06, 0xAB, 0x37, 0x6D, 0x2E, 0xA0, 0x2D, 0xA2, 0x8A, 0x7D, 0xEE, 0x8C, 0x12, 0xF1, 0x69, 0x2C};
+                //rnd.NextBytes(b);
+                //b[1] = 0xab; b[3] = 0x6d; b[5] = 0xa0; b[7] = 0xa2;
+                //b[9] = 0x7d; b[11] = 0x8c; b[13] = 0xf1; b[15] = 0x2c;
                 Console.Write("Private Key: ");
                 for (int j = 0; j < 16; j++) Console.Write(String.Format("{0:X02} ", b[j])); Console.WriteLine();
                 a38.setkey(b);
@@ -187,26 +187,30 @@ namespace SIMEmu
 
         static void Main(string[] args)
         {
-            int[] ct = new int[1<<7];
-            for (int x0 = 0; x0 < (1 << 7); x0++)
-                for (int d = 0; d < (1 << 7); d++)
-                {
-                    int x1 = (x0 + d) % (1<<7);
-                    if (x0 == x1) continue;
-                    int collide_count = 0;
-                    for (int y = 0; y < (1 << 7); y++)
-                    {
-                        int x0_ = x0, x1_ = x1, y0 = y, y1 = y;
-                        Comp128.swap(ref x0_, ref y0, 2);
-                        Comp128.swap(ref x1_, ref y1, 2);
-                        if (x0_ == x1_ && y0 == y1) collide_count++;
-                    }
-                    ct[d] += collide_count;
-                    if (collide_count < 1) continue;
-                   // Console.WriteLine(String.Format("{0:X2}{1:X2} Collision count: {2}", x0, d, collide_count));
-                }
-            for(int d=0;d<(1<<7);d++)
-                                    Console.WriteLine(String.Format("{0:X2} Collision count: {1}", d, ct[d]));
+            //uint[] m = new uint[(1<<5)*(1<<5)];
+            //for (int x0 = 0; x0 < (1 << 5); x0++)
+            //    for (int x1 = 0; x1 < (1 << 5); x1++)
+            //        for (int ir = 0; ir < (1 << 5); ir++)
+            //        {
+            //            int x0_ = x0;
+            //            int x1_ = x1;
+            //            int y0 = ir, y1 = ir;
+            //            Comp128.swap(ref x0_, ref y0, 4);
+            //            Comp128.swap(ref x1_, ref y1, 4);
+            //            if ((x0_ == x1_ && y0 == y1))
+            //            {
+            //                m[(x0<<5) | x1] |= ((uint)1 << ir);
+            //            }
+            //        }
+
+            //for (int i = 0; i < 32;i++ )
+            //{
+            //    uint r = 0xFFFFFFFF;
+            //    uint mask = (uint)1 << i;
+            //    for (int x = 0; x < (1 << 10); x++)
+            //        if ((m[x] & mask) > 0) r &= m[x];
+            //    Console.WriteLine(String.Format("{0:X2} : {1:X8}", i, r));
+            //}
 
             if (args.Length > 0)
             {
@@ -222,10 +226,9 @@ namespace SIMEmu
         {
             Comp128Cracker b = new Comp128Cracker(sim);
             bool new_session = b.InitNewSession(sessionfile);
-            b.Attack5R(new int[] { 0xAB, 0xAA, 0xA0, 0x9F, 0x7D, 0x05, 0xF1, 0x28 });
+            b.Attack5R(new int[] { 0xAB, 0x6D, 0xA0, 0xA2, 0x7D, 0x8C, 0xF1, 0x2C });
             if (new_session || ((!new_session) && (b.RestoreSession(sessionfile))))
             {
-                //b.Attack4R(0xab, 0xa0, 0x7d, 0xf1);
                 b.Start();
                 Console.ReadKey(true);
                 b.Stop();
