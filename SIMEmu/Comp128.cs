@@ -200,7 +200,7 @@ namespace SIMEmu
         {
             long r1 = Compute3R(K[0], K[2], K[4], K[6], R[0], R[2], R[4], R[6]);
             long r2 = Compute3R(K[1], K[3], K[5], K[7], R[1], R[3], R[5], R[7]);
-            for (int i = 0; i < 8; i++)
+            for (int i = 7; i >= 0; i--)
             {
                 Result[2 * i] = (int)(r1 & 0x3F);
                 Result[2 * i + 1] = (int)(r2 & 0x3F);
