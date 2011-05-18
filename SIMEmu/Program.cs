@@ -187,30 +187,6 @@ namespace SIMEmu
 
         static void Main(string[] args)
         {
-            //uint[] m = new uint[(1<<5)*(1<<5)];
-            //for (int x0 = 0; x0 < (1 << 5); x0++)
-            //    for (int x1 = 0; x1 < (1 << 5); x1++)
-            //        for (int ir = 0; ir < (1 << 5); ir++)
-            //        {
-            //            int x0_ = x0;
-            //            int x1_ = x1;
-            //            int y0 = ir, y1 = ir;
-            //            Comp128.swap(ref x0_, ref y0, 4);
-            //            Comp128.swap(ref x1_, ref y1, 4);
-            //            if ((x0_ == x1_ && y0 == y1))
-            //            {
-            //                m[(x0<<5) | x1] |= ((uint)1 << ir);
-            //            }
-            //        }
-
-            //for (int i = 0; i < 32;i++ )
-            //{
-            //    uint r = 0xFFFFFFFF;
-            //    uint mask = (uint)1 << i;
-            //    for (int x = 0; x < (1 << 10); x++)
-            //        if ((m[x] & mask) > 0) r &= m[x];
-            //    Console.WriteLine(String.Format("{0:X2} : {1:X8}", i, r));
-            //}
 
             if (args.Length > 0)
             {
@@ -226,7 +202,7 @@ namespace SIMEmu
         {
             Comp128Cracker b = new Comp128Cracker(sim);
             bool new_session = b.InitNewSession(sessionfile);
-            b.Attack5R(new int[] { 0xAB, 0x6D, 0xA0, 0xA2, 0x7D, 0x8C, 0xF1, 0x2C });
+            //b.Attack5R(new int[] { 0xAB, 0x6D, 0xA0, 0xA2, 0x7D, 0x8C, 0xF1, 0x2C });
             if (new_session || ((!new_session) && (b.RestoreSession(sessionfile))))
             {
                 b.Start();
